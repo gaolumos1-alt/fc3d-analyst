@@ -17,49 +17,77 @@ RECENT_ANALYZE = 100
 
 st.set_page_config(page_title="福彩3D 智能分析", page_icon="🎯", layout="centered")
 
-# ================= 苹果风 CSS 注入 =================
+# ================= 苹果明亮风 + 马卡龙晕染 + 梅花 背景 =================
 st.markdown("""
 <style>
-    /* 全局字体与背景 */
-    html, body, [class*="css"] {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    /* 强制明亮背景，马卡龙径向渐变晕染 */
+    .stApp {
+        background-color: #fbfbfd;
+        background-image: 
+            radial-gradient(circle at 10% 10%, rgba(255, 182, 193, 0.25) 0%, transparent 40%), /* 樱花粉 */
+            radial-gradient(circle at 90% 20%, rgba(176, 224, 230, 0.3) 0%, transparent 50%), /* 薄荷蓝 */
+            radial-gradient(circle at 80% 90%, rgba(221, 160, 221, 0.2) 0%, transparent 40%), /* 薰衣草紫 */
+            radial-gradient(circle at 20% 80%, rgba(255, 228, 196, 0.3) 0%, transparent 50%), /* 奶油黄 */
+            url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M50,10 C60,30 80,30 90,40 C80,60 90,80 70,80 C50,90 50,70 30,80 C10,80 20,60 10,40 C20,30 40,30 50,10 Z' fill='rgba(255,192,203,0.03)'/%3E%3C/svg%3E");
+        background-attachment: fixed;
+        background-size: cover, cover, cover, cover, 200px 200px;
     }
-    /* 卡片样式 */
+    
+    /* 强制黑色文字 */
+    body, p, h1, h2, h3, h4, h5, h6, div, span {
+        color: #1d1d1f !important;
+    }
+    
+    /* 侧边栏白底 */
+    [data-testid="stSidebar"] {
+        background-color: rgba(255, 255, 255, 0.85);
+        backdrop-filter: blur(10px);
+        border-right: 1px solid #e5e5ea;
+    }
+
+    /* 卡片样式 - 半透明磨砂玻璃风 */
     .apple-card {
-        background-color: var(--secondary-background-color);
-        border-radius: 16px;
-        padding: 20px;
+        background-color: rgba(255, 255, 255, 0.85);
+        backdrop-filter: blur(20px);
+        border-radius: 18px;
+        padding: 24px;
         margin-bottom: 20px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-        border: 1px solid rgba(128, 128, 128, 0.1);
+        box-shadow: 0 8px 24px rgba(0,0,0,0.04);
+        border: 1px solid rgba(255,255,255,0.6);
     }
+    
     .apple-title {
-        font-size: 20px;
+        font-size: 15px;
         font-weight: 600;
-        margin-bottom: 10px;
+        color: #86868b !important;
+        margin-bottom: 8px;
     }
     .pick-number {
-        font-size: 42px;
+        font-size: 46px;
         font-weight: 800;
-        color: #007aff; /* 苹果经典蓝 */
-        letter-spacing: 4px;
-        margin-bottom: 15px;
+        color: #007aff !important;
+        letter-spacing: 6px;
+        margin-bottom: 12px;
+        font-family: monospace;
     }
     .reason-text {
-        font-size: 15px;
-        color: #86868b;
+        font-size: 14px;
+        color: #1d1d1f !important;
         line-height: 1.5;
+        margin-top: 10px;
     }
     .badge {
         display: inline-block;
-        padding: 4px 10px;
+        padding: 6px 12px;
         border-radius: 20px;
-        font-size: 12px;
+        font-size: 13px;
         font-weight: 600;
-        margin-bottom: 10px;
     }
-    .badge-success { background-color: rgba(52, 199, 89, 0.15); color: #34c759; }
-    .badge-warning { background-color: rgba(255, 149, 0, 0.15); color: #ff9500; }
+    .badge-success { background-color: #e8f8ee; color: #28cd41 !important; }
+    .badge-warning { background-color: #fff4e6; color: #ff9500 !important; }
+    
+    /* 移除多余留白 */
+    .block-container { padding-top: 2rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -114,22 +142,19 @@ def check_history_appearance(df, code, lookback=1000):
             dates.append("日期未知")
     return len(matches), periods, dates
 
-def calculate_repeat_stats(df, window):
-    """统计最近 window 期内，与上一期重号的概率"""
-    recent_df = df.head(window + 1) # 多取一期用于对比
-    zero_repeat, one_repeat, two_repeat = 0, 0, 0
-    total = len(recent_df) - 1
-    if total <= 0: return 0, 0, 0
+def calculate_actual_repeat_stats(df, window):
+    """统计最近 window 期内，重复开出的号码数量和占比"""
+    window_df = df.head(window)
+    counts = window_df["完整号码"].value_counts()
     
-    for i in range(total):
-        curr_nums = set([recent_df.iloc[i]["百位"], recent_df.iloc[i]["十位"], recent_df.iloc[i]["个位"]])
-        prev_nums = set([recent_df.iloc[i+1]["百位"], recent_df.iloc[i+1]["十位"], recent_df.iloc[i+1]["个位"]])
-        overlap = len(curr_nums & prev_nums)
-        if overlap == 0: zero_repeat += 1
-        elif overlap == 1: one_repeat += 1
-        else: two_repeat += 1
-        
-    return (zero_repeat/total)*100, (one_repeat/total)*100, (two_repeat/total)*100
+    # 筛选出出现 2 次及以上的号码
+    duplicated_codes = counts[counts >= 2]
+    
+    num_dup_types = len(duplicated_codes)    # 有多少个不同的号码重复了
+    num_dup_draws = duplicated_codes.sum()   # 这些重复号码总共占据了多少期
+    prob = (num_dup_draws / window) * 100 if window > 0 else 0 # 重复期数占窗口的比例
+    
+    return num_dup_types, num_dup_draws, prob
 
 def get_missing_values(df, col_name, lookback=100):
     recent_df = df.head(lookback)
@@ -140,7 +165,7 @@ def get_missing_values(df, col_name, lookback=100):
         missing[num_str] = lookback if matches.empty else matches.index[0]
     return dict(sorted(missing.items(), key=lambda item: item[1], reverse=True))
 
-# ========== 推荐生成与原因分析 ==========
+# ========== 推荐生成逻辑 ==========
 def generate_reverse_picks(df, current_weights):
     exclude_set = set(df.head(EXCLUDE_RANGE)["完整号码"].tolist())
     recent_df = df.head(RECENT_ANALYZE)
@@ -179,9 +204,9 @@ def generate_reverse_picks(df, current_weights):
 
         reason = f"和值 {total_sum}，跨度 {span}，奇偶比 {odd_cnt}:{3-odd_cnt}。"
         if b in cold_pool["百位"] or s in cold_pool["十位"] or g in cold_pool["个位"]:
-            reason += " 采取冷号回补防守策略。"
+            reason += " 包含冷号回补逻辑。"
         else:
-            reason += " 结合近期热号趋势顺推。"
+            reason += " 顺应近期热号趋势。"
 
         picks.append(code)
         reasons.append(reason)
@@ -191,7 +216,7 @@ def generate_reverse_picks(df, current_weights):
 
 # ================= 页面 UI 渲染 =================
 st.title("🎯 福彩3D 智能分析终端")
-st.caption("苹果风UI | 趋势追踪 | 策略自我进化")
+st.caption("马卡龙明亮风格 | 横向定位走势 | 全盘追踪")
 
 with st.sidebar:
     st.header("📂 数据同步")
@@ -200,7 +225,7 @@ with st.sidebar:
     st.header("🔍 号码查重 (近1000期)")
     search_code = st.text_input("输入3位数字", max_chars=3)
 
-# 1. 读取数据
+# 数据加载
 df = pd.DataFrame()
 strategy_history = []
 
@@ -217,7 +242,7 @@ if uploaded_file is not None:
         st.sidebar.error(f"文件解析失败: {e}")
         st.stop()
 else:
-    with st.spinner("正在初始化全量数据（建议上传文件以加快速度）..."):
+    with st.spinner("正在初始化全量数据..."):
         all_raw = []
         page = 1
         while True:
@@ -230,8 +255,8 @@ else:
 
 if df.empty: st.stop()
 
-# 2. 增量更新
-with st.spinner("拉取最新开奖数据..."):
+# 增量更新
+with st.spinner("更新最新数据..."):
     new_raw = fetch_page(1) + fetch_page(2)
     new_df = process_data(new_raw)
     if not new_df.empty:
@@ -243,7 +268,6 @@ latest_row = df.iloc[0]
 latest_qihao = latest_row["期号"]
 st.info(f"**第 {latest_qihao} 期**  |  开奖号码: **{latest_row['完整号码']}**  |  {latest_row['开奖日期'].strftime('%Y-%m-%d') if pd.notna(latest_row['开奖日期']) else ''}")
 
-# 3. 查重结果
 if search_code and len(search_code) == 3 and search_code.isdigit():
     count, periods, dates = check_history_appearance(df, search_code, 1000)
     if count > 0:
@@ -252,34 +276,52 @@ if search_code and len(search_code) == 3 and search_code.isdigit():
         st.sidebar.success(f"✨ {search_code} 近1000期未开出")
 
 # ================= 模块：重号统计 =================
-st.markdown("### 📊 重号概率统计")
-col1, col2, col3 = st.columns(3)
-for col, window in zip([col1, col2, col3], [100, 200, 500]):
-    z, o, t = calculate_repeat_stats(df, window)
+st.markdown("### 📊 近期重号概率统计")
+st.caption("统计：在选定周期内，开出2次及以上的号码数量，以及这些重复期数占总期数的比例。")
+c1, c2, c3, c4 = st.columns(4)
+for col, window in zip([c1, c2, c3, c4], [100, 200, 500, 1000]):
+    num_types, num_draws, prob = calculate_actual_repeat_stats(df, window)
     with col:
-        st.metric(label=f"近{window}期", value=f"{o:.1f}%", delta="1个重号概率", delta_color="off")
-        st.caption(f"0重号: {z:.1f}% | 2重号: {t:.1f}%")
+        st.metric(label=f"近 {window} 期", value=f"{prob:.1f}% 重号率")
+        st.caption(f"重复号码: {num_types} 个\n共占据: {num_draws} 期")
 
-# ================= 模块：走势图 =================
-st.markdown("### 📈 近30期定位走势")
-chart_data = df.head(30).copy().sort_values("期号")
-chart_data["期号尾数"] = chart_data["期号"].str[-3:]
+# ================= 模块：竖向走势图 =================
+st.markdown("### 📈 定位走势图 (右图模式)")
+st.caption("X轴为数字0-9，Y轴为期号（从上往下）。通过连线观察号码上下跳跃的轨迹。")
+view_mode = st.radio("选择位置：", ["综合走势", "百位", "十位", "个位"], horizontal=True)
+
+# 取最近 30 期，并按时序正序（让最新在最上面）
+chart_data = df.head(30).copy().sort_values("期号", ascending=False)
+chart_data["期号"] = chart_data["期号"].astype(str)
+# 为了方便 Y 轴显示，取后三位
+chart_data["期号简写"] = chart_data["期号"].str[-3:]
 chart_data["百位"] = chart_data["百位"].astype(int)
 chart_data["十位"] = chart_data["十位"].astype(int)
 chart_data["个位"] = chart_data["个位"].astype(int)
 
-# 使用 Altair 画更漂亮的折线图
-melted_df = chart_data.melt(id_vars=['期号尾数'], value_vars=['百位', '十位', '个位'], 
-                            var_name='位置', value_name='数值')
+# 设置 Y 轴（期号时间线）
+y_axis = alt.Y('期号简写:N', title='期号', sort=chart_data['期号简写'].tolist(), axis=alt.Axis(labelAngle=0))
+# 设置 X 轴（0-9 数字）
+x_axis = alt.X('数值:Q', title='号码', scale=alt.Scale(domain=[-0.5, 9.5]), axis=alt.Axis(values=list(range(10))))
 
-chart = alt.Chart(melted_df).mark_line(point=True).encode(
-    x=alt.X('期号尾数:N', title='期号', axis=alt.Axis(labelAngle=-45)),
-    y=alt.Y('数值:Q', scale=alt.Scale(domain=[0, 9]), title='号码'),
-    color=alt.Color('位置:N', scale=alt.Scale(domain=['百位', '十位', '个位'], range=['#ff3b30', '#007aff', '#34c759'])),
-    tooltip=['期号尾数', '位置', '数值']
-).properties(height=300).interactive()
+if view_mode == "综合走势":
+    melted_df = chart_data.melt(id_vars=['期号简写'], value_vars=['百位', '十位', '个位'], var_name='位置', value_name='数值')
+    color_scale = alt.Scale(domain=['百位', '十位', '个位'], range=['#ff3b30', '#007aff', '#34c759'])
+    chart = alt.Chart(melted_df).mark_line(point=alt.OverlayMarkDef(size=40), strokeWidth=2).encode(
+        x=x_axis, y=y_axis, color=alt.Color('位置:N', scale=color_scale),
+        tooltip=['期号简写', '位置', '数值']
+    ).properties(height=500).interactive()
+else:
+    col_map = {"百位": "百位", "十位": "十位", "个位": "个位"}
+    target_col = col_map[view_mode]
+    color = '#007aff' if view_mode == "百位" else '#34c759' if view_mode == "十位" else '#ff9500'
+    
+    chart = alt.Chart(chart_data).mark_line(point=alt.OverlayMarkDef(size=50, color=color), strokeWidth=3, color=color).encode(
+        x=x_axis, y=y_axis, tooltip=['期号简写', alt.Tooltip(f'{target_col}:Q', title='数值')]
+    ).properties(height=500).interactive()
 
 st.altair_chart(chart, use_container_width=True)
+
 
 # ================= 模块：精选推荐 =================
 st.markdown("### 🎯 今日精选推荐")
@@ -307,12 +349,11 @@ else:
     })
     st.success(f"已生成针对第 {target_qihao} 期的新推荐！请下载保存。")
 
-# 渲染精美卡片
 for i, code in enumerate(picks):
     count, periods, dates = check_history_appearance(df, code, 1000)
     
     status_html = f"<span class='badge badge-warning'>⚠️ 近千期出现 {count} 次</span>" if count > 0 else "<span class='badge badge-success'>✨ 近千期未开出</span>"
-    history_html = f"<div style='font-size:12px; color:#86868b; margin-top:10px;'>最近记录: {', '.join(dates[:3])}...</div>" if count > 0 else ""
+    history_html = f"<div style='font-size:13px; color:#86868b; margin-top:12px;'>最近出现: {', '.join(dates[:3])}...</div>" if count > 0 else ""
     
     st.markdown(f"""
     <div class="apple-card">
@@ -325,7 +366,7 @@ for i, code in enumerate(picks):
     """, unsafe_allow_html=True)
 
 # ================= 模块：缺失分析 =================
-with st.expander("🔍 分位遗漏深度分析", expanded=False):
+with st.expander("🔍 分位遗漏深度分析 (寻找冷号)", expanded=False):
     c1, c2, c3 = st.columns(3)
     with c1:
         st.write("**百位**")
@@ -348,7 +389,7 @@ with st.sidebar:
             pd.DataFrame(strategy_history).to_excel(writer, sheet_name="策略记录", index=False)
             
     st.download_button(
-        label="⬇️ 下载最新 Excel (含记忆)",
+        label="⬇️ 下载最新 Excel",
         data=output.getvalue(),
         file_name=f"福彩3D_备份_{datetime.now().strftime('%Y%m%d')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
