@@ -17,45 +17,95 @@ RECENT_ANALYZE = 100
 
 st.set_page_config(page_title="福彩3D 智能分析", page_icon="🎯", layout="centered")
 
-# ================= 苹果明亮风 + 马卡龙晕染 + 梅花 背景 =================
+# ================= 苹果明亮风 + 马卡龙晕染 + 组件深度美化 CSS =================
 st.markdown("""
 <style>
-    /* 强制明亮背景，马卡龙径向渐变晕染 */
+    /* 强制全局浅灰背景与马卡龙晕染 */
     .stApp {
         background-color: #fbfbfd;
         background-image: 
-            radial-gradient(circle at 10% 10%, rgba(255, 182, 193, 0.25) 0%, transparent 40%), /* 樱花粉 */
-            radial-gradient(circle at 90% 20%, rgba(176, 224, 230, 0.3) 0%, transparent 50%), /* 薄荷蓝 */
-            radial-gradient(circle at 80% 90%, rgba(221, 160, 221, 0.2) 0%, transparent 40%), /* 薰衣草紫 */
-            radial-gradient(circle at 20% 80%, rgba(255, 228, 196, 0.3) 0%, transparent 50%), /* 奶油黄 */
-            url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M50,10 C60,30 80,30 90,40 C80,60 90,80 70,80 C50,90 50,70 30,80 C10,80 20,60 10,40 C20,30 40,30 50,10 Z' fill='rgba(255,192,203,0.03)'/%3E%3C/svg%3E");
+            radial-gradient(circle at 10% 10%, rgba(255, 182, 193, 0.25) 0%, transparent 40%),
+            radial-gradient(circle at 90% 20%, rgba(176, 224, 230, 0.3) 0%, transparent 50%),
+            radial-gradient(circle at 80% 90%, rgba(221, 160, 221, 0.2) 0%, transparent 40%),
+            radial-gradient(circle at 20% 80%, rgba(255, 228, 196, 0.3) 0%, transparent 50%);
         background-attachment: fixed;
-        background-size: cover, cover, cover, cover, 200px 200px;
     }
     
-    /* 强制黑色文字 */
+    /* 强制所有普通文字为深黑色 */
     body, p, h1, h2, h3, h4, h5, h6, div, span {
         color: #1d1d1f !important;
     }
     
-    /* 侧边栏白底 */
+    /* ======= 侧边栏与上传组件美化 ======= */
     [data-testid="stSidebar"] {
-        background-color: rgba(255, 255, 255, 0.85);
-        backdrop-filter: blur(10px);
-        border-right: 1px solid #e5e5ea;
-    }
-
-    /* 卡片样式 - 半透明磨砂玻璃风 */
-    .apple-card {
-        background-color: rgba(255, 255, 255, 0.85);
+        background-color: rgba(255, 255, 255, 0.7) !important;
         backdrop-filter: blur(20px);
-        border-radius: 18px;
-        padding: 24px;
-        margin-bottom: 20px;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.04);
-        border: 1px solid rgba(255,255,255,0.6);
+        border-right: 1px solid rgba(0,0,0,0.05);
+    }
+    /* 上传框强制白底 */
+    [data-testid="stFileUploader"] {
+        background-color: #ffffff !important;
+        border-radius: 12px;
+        padding: 10px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+    }
+    [data-testid="stFileUploader"] section {
+        background-color: #f5f5f7 !important;
+        border: 1px dashed #007aff !important;
+    }
+    [data-testid="stFileUploader"] small { color: #86868b !important; }
+    
+    /* 下载按钮美化 */
+    [data-testid="stDownloadButton"] button {
+        background-color: #007aff !important;
+        color: #ffffff !important;
+        border-radius: 12px;
+        font-weight: 600;
+        border: none;
+        transition: all 0.3s;
+    }
+    [data-testid="stDownloadButton"] button:hover {
+        background-color: #005bb5 !important;
+        box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
     }
     
+    /* ======= 单选按钮 (走势图切换) 美化 ======= */
+    [data-testid="stRadio"] > div {
+        background-color: #ffffff !important;
+        padding: 10px;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.03);
+    }
+    .stRadio [data-baseweb="radio"] div { color: #1d1d1f !important; }
+    
+    /* ======= 重号统计指标卡美化 ======= */
+    [data-testid="stMetric"] {
+        background-color: rgba(255, 255, 255, 0.9) !important;
+        padding: 15px;
+        border-radius: 16px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+        border: 1px solid rgba(0,0,0,0.03);
+    }
+    [data-testid="stMetricValue"] { color: #1d1d1f !important; font-weight: 800; font-size: 28px; }
+    [data-testid="stMetricLabel"] { color: #86868b !important; }
+
+    /* ======= 顶部 Info 框美化 ======= */
+    .stInfo {
+        background-color: #ffffff !important;
+        border: 1px solid #e5e5ea !important;
+        border-radius: 14px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.02);
+    }
+
+    /* ======= 本期推荐卡片美化 ======= */
+    .apple-card {
+        background-color: #ffffff;
+        border-radius: 16px;
+        padding: 24px;
+        margin-bottom: 20px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.05);
+        border: 1px solid #e5e5ea;
+    }
     .apple-title {
         font-size: 15px;
         font-weight: 600;
@@ -63,12 +113,12 @@ st.markdown("""
         margin-bottom: 8px;
     }
     .pick-number {
-        font-size: 46px;
+        font-size: 48px;
         font-weight: 800;
         color: #007aff !important;
-        letter-spacing: 6px;
+        letter-spacing: 8px;
         margin-bottom: 12px;
-        font-family: monospace;
+        font-family: -apple-system, BlinkMacSystemFont, monospace;
     }
     .reason-text {
         font-size: 14px;
@@ -85,9 +135,6 @@ st.markdown("""
     }
     .badge-success { background-color: #e8f8ee; color: #28cd41 !important; }
     .badge-warning { background-color: #fff4e6; color: #ff9500 !important; }
-    
-    /* 移除多余留白 */
-    .block-container { padding-top: 2rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -143,17 +190,12 @@ def check_history_appearance(df, code, lookback=1000):
     return len(matches), periods, dates
 
 def calculate_actual_repeat_stats(df, window):
-    """统计最近 window 期内，重复开出的号码数量和占比"""
     window_df = df.head(window)
     counts = window_df["完整号码"].value_counts()
-    
-    # 筛选出出现 2 次及以上的号码
     duplicated_codes = counts[counts >= 2]
-    
-    num_dup_types = len(duplicated_codes)    # 有多少个不同的号码重复了
-    num_dup_draws = duplicated_codes.sum()   # 这些重复号码总共占据了多少期
-    prob = (num_dup_draws / window) * 100 if window > 0 else 0 # 重复期数占窗口的比例
-    
+    num_dup_types = len(duplicated_codes)
+    num_dup_draws = duplicated_codes.sum()
+    prob = (num_dup_draws / window) * 100 if window > 0 else 0
     return num_dup_types, num_dup_draws, prob
 
 def get_missing_values(df, col_name, lookback=100):
@@ -285,41 +327,46 @@ for col, window in zip([c1, c2, c3, c4], [100, 200, 500, 1000]):
         st.metric(label=f"近 {window} 期", value=f"{prob:.1f}% 重号率")
         st.caption(f"重复号码: {num_types} 个\n共占据: {num_draws} 期")
 
-# ================= 模块：竖向走势图 =================
+# ================= 模块：竖向走势图 (户外撞色版) =================
 st.markdown("### 📈 定位走势图 (右图模式)")
 st.caption("X轴为数字0-9，Y轴为期号（从上往下）。通过连线观察号码上下跳跃的轨迹。")
 view_mode = st.radio("选择位置：", ["综合走势", "百位", "十位", "个位"], horizontal=True)
 
-# 取最近 30 期，并按时序正序（让最新在最上面）
+# 取最近 30 期，并按时序正序
 chart_data = df.head(30).copy().sort_values("期号", ascending=False)
 chart_data["期号"] = chart_data["期号"].astype(str)
-# 为了方便 Y 轴显示，取后三位
 chart_data["期号简写"] = chart_data["期号"].str[-3:]
 chart_data["百位"] = chart_data["百位"].astype(int)
 chart_data["十位"] = chart_data["十位"].astype(int)
 chart_data["个位"] = chart_data["个位"].astype(int)
 
-# 设置 Y 轴（期号时间线）
-y_axis = alt.Y('期号简写:N', title='期号', sort=chart_data['期号简写'].tolist(), axis=alt.Axis(labelAngle=0))
-# 设置 X 轴（0-9 数字）
-x_axis = alt.X('数值:Q', title='号码', scale=alt.Scale(domain=[-0.5, 9.5]), axis=alt.Axis(values=list(range(10))))
+# 统一背景透明，标签深色
+chart_base_config = dict(
+    background='transparent',
+    view=alt.ViewConfig(stroke='transparent')
+)
+
+y_axis = alt.Y('期号简写:N', title='期号', sort=chart_data['期号简写'].tolist(), axis=alt.Axis(labelAngle=0, labelColor='#1d1d1f', titleColor='#1d1d1f'))
+x_axis = alt.X('数值:Q', title='号码', scale=alt.Scale(domain=[-0.5, 9.5]), axis=alt.Axis(values=list(range(10)), labelColor='#1d1d1f', titleColor='#1d1d1f'))
 
 if view_mode == "综合走势":
     melted_df = chart_data.melt(id_vars=['期号简写'], value_vars=['百位', '十位', '个位'], var_name='位置', value_name='数值')
-    color_scale = alt.Scale(domain=['百位', '十位', '个位'], range=['#ff3b30', '#007aff', '#34c759'])
-    chart = alt.Chart(melted_df).mark_line(point=alt.OverlayMarkDef(size=40), strokeWidth=2).encode(
+    # 户外撞色：亮橙 #FF5722, 湖蓝 #00BCD4, 翠绿 #8BC34A
+    color_scale = alt.Scale(domain=['百位', '十位', '个位'], range=['#FF5722', '#00BCD4', '#8BC34A'])
+    chart = alt.Chart(melted_df).mark_line(point=alt.OverlayMarkDef(size=60, filled=True, stroke='white', strokeWidth=2), strokeWidth=3).encode(
         x=x_axis, y=y_axis, color=alt.Color('位置:N', scale=color_scale),
         tooltip=['期号简写', '位置', '数值']
-    ).properties(height=500).interactive()
+    ).properties(height=550, **chart_base_config).interactive()
 else:
     col_map = {"百位": "百位", "十位": "十位", "个位": "个位"}
     target_col = col_map[view_mode]
-    color = '#007aff' if view_mode == "百位" else '#34c759' if view_mode == "十位" else '#ff9500'
+    color = '#FF5722' if view_mode == "百位" else '#00BCD4' if view_mode == "十位" else '#8BC34A'
     
-    chart = alt.Chart(chart_data).mark_line(point=alt.OverlayMarkDef(size=50, color=color), strokeWidth=3, color=color).encode(
+    chart = alt.Chart(chart_data).mark_line(point=alt.OverlayMarkDef(size=70, filled=True, color=color, stroke='white', strokeWidth=2), strokeWidth=4, color=color).encode(
         x=x_axis, y=y_axis, tooltip=['期号简写', alt.Tooltip(f'{target_col}:Q', title='数值')]
-    ).properties(height=500).interactive()
+    ).properties(height=550, **chart_base_config).interactive()
 
+# 渲染图表
 st.altair_chart(chart, use_container_width=True)
 
 
