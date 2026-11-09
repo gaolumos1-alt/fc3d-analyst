@@ -42,7 +42,6 @@ st.markdown("""
         backdrop-filter: blur(20px);
         border-right: 1px solid rgba(0,0,0,0.05);
     }
-    /* 上传框强制白底 */
     [data-testid="stFileUploader"] {
         background-color: #ffffff !important;
         border-radius: 12px;
@@ -196,7 +195,7 @@ def calculate_actual_repeat_stats(df, window):
     num_dup_types = len(duplicated_codes)
     num_dup_draws = duplicated_codes.sum()
     prob = (num_dup_draws / window) * 100 if window > 0 else 0
-    return num_dup_types, num_dup_draws, prob
+    return num_dup_types, num_dup_draws, prob, duplicated_codes
 
 def get_missing_values(df, col_name, lookback=100):
     recent_df = df.head(lookback)
@@ -258,7 +257,7 @@ def generate_reverse_picks(df, current_weights):
 
 # ================= 页面 UI 渲染 =================
 st.title("🎯 福彩3D 智能分析终端")
-st.caption("马卡龙明亮风格 | 横向定位走势 | 全盘追踪")
+st.caption("马卡龙明亮风格 | 竖向定位走势 | 重号明细追踪")
 
 with st.sidebar:
     st.header("📂 数据同步")
@@ -319,40 +318,65 @@ if search_code and len(search_code) == 3 and search_code.isdigit():
 
 # ================= 模块：重号统计 =================
 st.markdown("### 📊 近期重号概率统计")
-st.caption("统计：在选定周期内，开出2次及以上的号码数量，以及这些重复期数占总期数的比例。")
+st.caption("统计：在选定周期内，开出2次及以上的号码数量及比例。")
+
+# 增加开关查看重号明细
+show_repeat_details = st.toggle("显示重复号码明细", value=False)
+
 c1, c2, c3, c4 = st.columns(4)
-for col, window in zip([c1, c2, c3, c4], [100, 200, 500, 1000]):
-    num_types, num_draws, prob = calculate_actual_repeat_stats(df, window)
+windows = [100, 200, 500, 1000]
+dup_data_store = {}
+
+for col, window in zip([c1, c2, c3, c4], windows):
+    num_types, num_draws, prob, dup_codes = calculate_actual_repeat_stats(df, window)
+    dup_data_store[window] = dup_codes
     with col:
         st.metric(label=f"近 {window} 期", value=f"{prob:.1f}% 重号率")
         st.caption(f"重复号码: {num_types} 个\n共占据: {num_draws} 期")
 
-# ================= 模块：竖向走势图 (户外撞色版) =================
+if show_repeat_details:
+    st.markdown("---")
+    st.write("**🔍 各周期重复号码明细**")
+    cols = st.columns(4)
+    for col, window in zip(cols, windows):
+        with col:
+            st.write(f"**近 {window} 期**")
+            dup_series = dup_data_store[window]
+            if not dup_series.empty:
+                dup_df = pd.DataFrame({
+                    "号码": dup_series.index,
+                    "出现次数": dup_series.values
+                }).sort_values(by="出现次数", ascending=False)
+                st.dataframe(dup_df, hide_index=True, use_container_width=True)
+            else:
+                st.write("无重复号码")
+
+
+# ================= 模块：竖向走势图 (向负Y轴更新) =================
 st.markdown("### 📈 定位走势图 (右图模式)")
-st.caption("X轴为数字0-9，Y轴为期号（从上往下）。通过连线观察号码上下跳跃的轨迹。")
+st.caption("X轴为数字0-9，Y轴为期号（从上往下）。通过连线观察号码跳跃轨迹。")
 view_mode = st.radio("选择位置：", ["综合走势", "百位", "十位", "个位"], horizontal=True)
 
-# 取最近 30 期，并按时序正序
-chart_data = df.head(30).copy().sort_values("期号", ascending=False)
+# 取最近 30 期，按时间正序（最旧的在上，最新的在下，满足向负Y轴更新）
+chart_data = df.head(30).copy().sort_values("期号", ascending=True)
 chart_data["期号"] = chart_data["期号"].astype(str)
 chart_data["期号简写"] = chart_data["期号"].str[-3:]
 chart_data["百位"] = chart_data["百位"].astype(int)
 chart_data["十位"] = chart_data["十位"].astype(int)
 chart_data["个位"] = chart_data["个位"].astype(int)
 
-# 统一背景透明，标签深色
+# 设置统一的背景和轴颜色
 chart_base_config = dict(
     background='transparent',
-    view=alt.ViewConfig(stroke='transparent')
 )
 
 y_axis = alt.Y('期号简写:N', title='期号', sort=chart_data['期号简写'].tolist(), axis=alt.Axis(labelAngle=0, labelColor='#1d1d1f', titleColor='#1d1d1f'))
-x_axis = alt.X('数值:Q', title='号码', scale=alt.Scale(domain=[-0.5, 9.5]), axis=alt.Axis(values=list(range(10)), labelColor='#1d1d1f', titleColor='#1d1d1f'))
 
 if view_mode == "综合走势":
     melted_df = chart_data.melt(id_vars=['期号简写'], value_vars=['百位', '十位', '个位'], var_name='位置', value_name='数值')
-    # 户外撞色：亮橙 #FF5722, 湖蓝 #00BCD4, 翠绿 #8BC34A
     color_scale = alt.Scale(domain=['百位', '十位', '个位'], range=['#FF5722', '#00BCD4', '#8BC34A'])
+    x_axis = alt.X('数值:Q', title='号码', scale=alt.Scale(domain=[-0.5, 9.5]), axis=alt.Axis(values=list(range(10)), labelColor='#1d1d1f', titleColor='#1d1d1f'))
+    
     chart = alt.Chart(melted_df).mark_line(point=alt.OverlayMarkDef(size=60, filled=True, stroke='white', strokeWidth=2), strokeWidth=3).encode(
         x=x_axis, y=y_axis, color=alt.Color('位置:N', scale=color_scale),
         tooltip=['期号简写', '位置', '数值']
@@ -361,12 +385,13 @@ else:
     col_map = {"百位": "百位", "十位": "十位", "个位": "个位"}
     target_col = col_map[view_mode]
     color = '#FF5722' if view_mode == "百位" else '#00BCD4' if view_mode == "十位" else '#8BC34A'
+    # 【修复】X 轴动态指定为目标列
+    x_axis_single = alt.X(f'{target_col}:Q', title='号码', scale=alt.Scale(domain=[-0.5, 9.5]), axis=alt.Axis(values=list(range(10)), labelColor='#1d1d1f', titleColor='#1d1d1f'))
     
     chart = alt.Chart(chart_data).mark_line(point=alt.OverlayMarkDef(size=70, filled=True, color=color, stroke='white', strokeWidth=2), strokeWidth=4, color=color).encode(
-        x=x_axis, y=y_axis, tooltip=['期号简写', alt.Tooltip(f'{target_col}:Q', title='数值')]
+        x=x_axis_single, y=y_axis, tooltip=['期号简写', alt.Tooltip(f'{target_col}:Q', title='数值')]
     ).properties(height=550, **chart_base_config).interactive()
 
-# 渲染图表
 st.altair_chart(chart, use_container_width=True)
 
 
