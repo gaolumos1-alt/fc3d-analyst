@@ -36,6 +36,7 @@ st.markdown("""
     .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
     .badge-success { background-color: #e8f8ee; color: #28cd41 !important; }
     .badge-warning { background-color: #fff4e6; color: #ff9500 !important; }
+    .badge-danger { background-color: #ffe5e5; color: #ff3b30 !important; }
     
     .review-card { background-color: #fff9f0; border-left: 6px solid #ff9500; border-radius: 12px; padding: 16px; margin-bottom: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.04); font-size: 14px; }
     .insp-hit { background-color: #e8f8ee; border-left: 4px solid #28cd41; padding: 10px; margin-top: 10px; border-radius: 6px; color: #1d1d1f; font-weight: bold; }
@@ -45,14 +46,13 @@ st.markdown("""
     div[data-testid="stSelectbox"] > div { background-color: #f5f5f7; border-radius: 10px; border: 1px solid #e5e5ea; }
     .stSelectbox { margin-bottom: -10px; }
     
-    /* 响应式：手机端自动折叠为单栏 */
     @media (max-width: 768px) {
         [data-testid="column"] { width: 100% !important; flex: 1 1 100% !important; }
     }
 </style>
 """, unsafe_allow_html=True)
 
-# ========== 核心抓取与数据库（带缓存加速） ==========
+# ========== 核心抓取与数据库 ==========
 @st.cache_data(ttl=3600)
 def fetch_page(page, limit=100):
     params = {"type": LOTTERY_TYPE, "page": page, "limit": limit}
@@ -104,7 +104,7 @@ def sync_database():
     finally:
         conn.close()
 
-@st.cache_data(ttl=600) # 10分钟缓存，极大提升交互速度
+@st.cache_data(ttl=600)
 def load_data_from_db():
     conn = get_db_connection()
     try:
@@ -120,17 +120,12 @@ def load_data_from_db():
     df["完整号码"] = df["百位"] + df["十位"] + df["个位"]
     df["开奖日期"] = pd.to_datetime(df["开奖日期"], errors='coerce')
     
-    # 扩充数据维度：形态、012路、连号/同号
     def analyze_shape(code):
         nums = sorted([int(c) for c in code])
         shape = "组六"
         if len(set(nums)) == 1: shape = "豹子"
         elif len(set(nums)) == 2: shape = "组三"
-        
-        # 012路
         r012 = f"{sum(1 for n in nums if n%3==0)}{sum(1 for n in nums if n%3==1)}{sum(1 for n in nums if n%3==2)}"
-        
-        # 连号/同号
         lianhao = any(nums[i] + 1 == nums[i+1] for i in range(len(nums)-1))
         tonghao = len(set(nums)) < 3
         return shape, r012, lianhao, tonghao
@@ -140,7 +135,6 @@ def load_data_from_db():
     df["012路"] = [r[1] for r in res]
     df["连号"] = ["是" if r[2] else "否" for r in res]
     df["同号"] = ["是" if r[3] else "否" for r in res]
-    
     df["和值"] = df[["百位", "十位", "个位"]].astype(int).sum(axis=1)
     df["跨度"] = df[["百位", "十位", "个位"]].astype(int).max(axis=1) - df[["百位", "十位", "个位"]].astype(int).min(axis=1)
     df["奇偶比"] = df.apply(lambda r: f"{sum(1 for c in [r['百位'], r['十位'], r['个位']] if int(c)%2!=0)}:{3 - sum(1 for c in [r['百位'], r['十位'], r['个位']] if int(c)%2!=0)}", axis=1)
@@ -248,17 +242,14 @@ def predict_next_cold_hot(df):
     warm_pool = [num for num, f in freqs_sorted[3:7]]
     hot_pool = [num for num, f in freqs_sorted[7:]]
     
-    # 简化版马尔可夫转移：上一期百/十/个位 -> 这一期的偏好
     latest_nums = [df.iloc[0]["百位"], df.iloc[0]["十位"], df.iloc[0]["个位"]]
     trans_bias = {}
     for i, col in enumerate(["百位", "十位", "个位"]):
         prev_num = latest_nums[i]
-        # 找历史中上一期开出prev_num时，下一期开出的Top号码
         mask = df[col].shift(-1) == prev_num
         next_nums = df[mask][col].tolist()
         if next_nums:
-            top_next = Counter(next_nums).most_common(1)[0][0]
-            trans_bias[col] = top_next
+            trans_bias[col] = Counter(next_nums).most_common(1)[0][0]
             
     recent_10 = df.head(10)
     recent_cold_cnt = sum(1 for _, r in recent_10.iterrows() for c in ["百位", "十位", "个位"] if r[c] in cold_pool)
@@ -271,6 +262,30 @@ def predict_next_cold_hot(df):
         advise_ratio = "建议配比：2冷 + 1温"
         
     return trend_msg, advise_ratio, sorted(cold_pool), sorted(warm_pool), sorted(hot_pool), trans_bias
+
+# ========== 试机号联动分析 ==========
+def analyze_trial_number(test_code, current_picks):
+    nums = [int(c) for c in test_code]
+    total_sum = sum(nums)
+    span = max(nums) - min(nums)
+    
+    # 常见杀号公式推演
+    sha_tail = total_sum % 10  # 和值尾杀
+    sha_span = span # 跨度杀
+    
+    # 与今日推荐的联动
+    combined_picks = "".join(current_picks)
+    has_test_num = any(str(n) in combined_picks for n in nums)
+    
+    advice = []
+    if has_test_num:
+        advice.append("今日推荐号中包含了试机号的数字，存在重号可能，建议作为定胆参考。")
+    else:
+        advice.append("今日推荐号完美避开了试机号的数字，可能开出试机号邻码，防范1个重号。")
+        
+    advice.append(f"【杀号参考】根据试机号推演，本期可杀和值尾数 <b>{sha_tail}</b> 及跨度 <b>{sha_span}</b> 附近的极端组合。")
+    
+    return total_sum, span, advice
 
 # ========== 评估与回测功能 ==========
 def evaluate_custom_number(df, code):
@@ -314,7 +329,6 @@ def check_history_appearance(df, code, lookback=1000):
     dates = [f"{d.strftime('%Y-%m-%d')}(距今{(datetime.now()-d).days}天)" if pd.notna(d) else "未知" for d in matches["开奖日期"]]
     return len(matches), periods, dates
 
-# ========== 终极选号算法（带遗漏回归） ==========
 def generate_picks_core(df, current_weights, exclude_range, analyze_range, num_picks=5, is_extra=False):
     exclude_set = set(df.head(exclude_range)["完整号码"].tolist())
     recent_df = df.head(analyze_range)
@@ -354,19 +368,26 @@ def generate_picks_core(df, current_weights, exclude_range, analyze_range, num_p
 
         cold_count = sum(1 for x in [b,s,g] if x in pools["冷"]["百位"]+pools["冷"]["十位"]+pools["冷"]["个位"])
         reason = f"和值{total_sum}，跨度{span}。 " + ("侧重冷号回补。" if cold_count > 0 else "倾向热/温号。")
-        picks.append(code); reasons.append(reasons)
+        picks.append(code); reasons.append(reason)
         exclude_set.add(code)
     return picks, reasons
 
 # ================= 页面渲染 =================
 st.title("🎯 福彩3D 终极量化终端")
-st.caption("遗漏回归 | 马尔可夫预测 | 全维度统计 | 动态调参")
+st.caption("遗漏回归 | 试机号联动 | 全维度统计 | 动态调参")
 
-# --- 侧边栏：参数面板化 & 查重 ---
+# --- 侧边栏 ---
 with st.sidebar:
     st.header("⚙️ 策略参数调节")
     exclude_range = st.slider("排重期数 (避开近期开出)", 50, 500, 100, step=10)
     analyze_range = st.slider("冷热分析期数", 50, 200, 100, step=10)
+    
+    st.markdown("---")
+    st.header("🎲 今日试机号")
+    test_b = st.selectbox("试机号 百位", [str(i) for i in range(10)], index=0, key="test_b")
+    test_s = st.selectbox("试机号 十位", [str(i) for i in range(10)], index=0, key="test_s")
+    test_g = st.selectbox("试机号 个位", [str(i) for i in range(10)], index=0, key="test_g")
+    test_code = f"{test_b}{test_s}{test_g}"
     
     st.markdown("---")
     st.header("🔍 号码查重")
@@ -439,6 +460,13 @@ with col_left:
             conn.commit()
         finally: conn.close()
 
+    # 试机号联动分析卡片
+    t_sum, t_span, t_advice = analyze_trial_number(test_code, picks)
+    st.markdown(f"""<div style="background:#eef2f9; padding:12px; border-radius:8px; margin-bottom:12px; font-size:13px;">
+<b style="color:#007aff;">🎲 试机号 [{test_code}] 联动：</b> 和值 {t_sum}，跨度 {t_span}。<br>
+{"<br>".join(t_advice)}
+</div>""", unsafe_allow_html=True)
+
     c_pick1, c_pick2 = st.columns(2)
     for i, code in enumerate(picks):
         count, _, _ = check_history_appearance(df, code, 1000)
@@ -495,7 +523,6 @@ with col_right:
 <div style="flex:1; background:#fbe9e7; padding:10px; border-radius:8px; text-align:center;"><b style="color:#ff5722;">🔥 热号池</b><br>{', '.join(hots)}</div>
 </div>""", unsafe_allow_html=True)
 
-    # 连号与同号统计
     recent_100 = df.head(100)
     lian_rate = (recent_100["连号"] == "是").mean() * 100
     tong_rate = (recent_100["同号"] == "是").mean() * 100
