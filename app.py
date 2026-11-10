@@ -89,9 +89,8 @@ def fetch_page(page, limit=100):
         pass
     return []
 
-@st.cache_resource
 def get_db_connection():
-    """创建并缓存 Neon 数据库连接"""
+    """每次调用都返回一个全新的数据库连接，用完即关，避免连接失效"""
     db_url = st.secrets["DATABASE_URL"]
     return psycopg2.connect(db_url, sslmode='require')
 
@@ -130,6 +129,9 @@ def sync_database():
                 values = [(d["code"], d["day"], str(d["one"]), str(d["two"]), str(d["three"])) for d in records_to_insert]
                 psycopg2.extras.execute_values(cur, insert_query, values)
             conn.commit()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"同步数据时出错: {e}")
     finally:
         conn.close()
 
