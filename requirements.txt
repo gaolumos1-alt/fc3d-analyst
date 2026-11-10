@@ -1,7 +1,8 @@
 streamlit
-supabase
 pandas
 numpy
 altair
 openpyxl
 requests
+psycopg2-binary
+sqlalchemy
