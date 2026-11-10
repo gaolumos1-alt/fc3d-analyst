@@ -211,15 +211,24 @@ def review_and_optimize(df):
             
             # 获取上一次的权重作为默认值
             cur.execute("SELECT weights_cold, weights_hot FROM strategy_records ORDER BY id DESC LIMIT 1;")
-            last_weights = cur.fetchone()
+            last_weights_row = cur.fetchone()
     finally:
         conn.close()
 
     default_weights = {"cold": 0.30, "hot": 0.20} # 调整默认基础权重
     
+    # 修复 KeyError：安全地将数据库字段映射为标准键名
+    if last_weights_row:
+        last_weights = {
+            "cold": last_weights_row.get("weights_cold") if last_weights_row.get("weights_cold") is not None else 0.30,
+            "hot": last_weights_row.get("weights_hot") if last_weights_row.get("weights_hot") is not None else 0.20
+        }
+    else:
+        last_weights = default_weights.copy()
+
     if not record:
-        # 如果没找到这一期的推荐（比如程序刚上线），直接返回默认
-        return default_weights, None
+        # 如果没找到这一期的推荐，直接返回上次权重，不生成复盘数据
+        return last_weights, None
 
     picks = record["picks"].split(", ")
     reasons = record["reasons"].split(" | ")
@@ -246,7 +255,7 @@ def review_and_optimize(df):
     group_hit = any("".join(sorted(p)) == sorted_actual for p in picks)
     
     # 进化逻辑
-    new_weights = last_weights.copy() if last_weights else default_weights.copy()
+    new_weights = last_weights.copy()
     
     if cold_cnt >= 2:
         # 再次开出冷号，说明冷号在回补，适当维持冷号高权重，热号降低
