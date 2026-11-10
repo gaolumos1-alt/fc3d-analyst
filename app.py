@@ -171,7 +171,6 @@ def load_data_from_db():
     return df
 
 def save_inspiration_picks(target_qihao, picks):
-    """将当日刷新的灵感号码保存到数据库"""
     conn = get_db_connection()
     try:
         with conn.cursor() as cur:
@@ -191,8 +190,6 @@ def review_and_optimize(df):
             record = cur.fetchone()
             cur.execute("SELECT weights_cold, weights_hot FROM strategy_records ORDER BY id DESC LIMIT 1;")
             last_weights_row = cur.fetchone()
-            
-            # 查询当期的所有灵感号码
             cur.execute("SELECT picks FROM inspiration_pool WHERE target_qihao = %s;", (latest_qihao,))
             insp_records = cur.fetchall()
     finally:
@@ -211,7 +208,6 @@ def review_and_optimize(df):
     picks = record["picks"].split(", ")
     actual_code = latest_row["完整号码"]
     
-    # 统计冷热
     recent_100 = df.iloc[1:101]
     freq_counter = Counter()
     for _, r in recent_100.iterrows():
@@ -224,7 +220,6 @@ def review_and_optimize(df):
         if f <= 5: cold_cnt += 1
         elif f >= 12: hot_cnt += 1
 
-    # 核心推荐比对
     actual_sum, actual_span = latest_row["和值"], latest_row["跨度"]
     detailed_analysis = []
     for p in picks:
@@ -246,18 +241,16 @@ def review_and_optimize(df):
         analysis_str += f"跨度 {p_span} (开奖 {actual_span})。"
         detailed_analysis.append(analysis_str)
 
-    # 灵感池比对
     insp_hits = []
     all_insp_picks = []
     for r in insp_records:
         all_insp_picks.extend(r["picks"].split(", "))
-    all_insp_picks = list(set(all_insp_picks)) # 去重
+    all_insp_picks = list(set(all_insp_picks)) 
     
     for p in all_insp_picks:
         if p == actual_code or "".join(sorted(p)) == "".join(sorted(actual_code)):
             insp_hits.append(p)
 
-    # 策略进化
     new_weights = last_weights.copy()
     if cold_cnt >= 2:
         new_weights["cold"] = min(0.40, new_weights["cold"] + 0.02)
@@ -419,6 +412,8 @@ target_qihao = str(int(latest_qihao) + 1) if latest_qihao.isdigit() else latest_
 
 # --- 顶部：深度复盘 ---
 if review_data:
+    # 修复核心：先拼接字符串，且不要在 f-string 内部产生多余的缩进换行
+    analysis_html = "<br>".join(review_data['detailed_analysis'])
     insp_html = ""
     if review_data['insp_hits']:
         hits_str = ", ".join(review_data['insp_hits'])
@@ -426,22 +421,13 @@ if review_data:
     elif review_data['total_insp_count'] > 0:
         insp_html = f'<div style="margin-top:10px; color:#86868b; font-size:13px;">(昨日共生成 {review_data["total_insp_count"]} 注灵感号码，未命中)</div>'
 
-    st.markdown(f"""
-    <div class="review-card">
-        <h4 style="margin-top:0; color:#ff9500;">📝 昨日深度复盘：第 {review_data['qihao']} 期</h4>
-        <div style="margin-bottom:10px; font-size:16px;">
-            实际开奖：<b style="color:#007aff; font-size:20px;">{review_data['actual_code']}</b> 
-            (和值 {review_data['actual_sum']}, 跨度 {review_data['actual_span']}, 冷{review_data['cold_cnt']}/热{review_data['hot_cnt']})
-        </div>
-        <div style="background:#fff; padding:10px; border-radius:8px;">
-            {"<br>".join(review_data['detailed_analysis'])}
-        </div>
-        {insp_html}
-        <div style="margin-top:10px; font-weight:bold; color:#28cd41;">
-            🧠 策略进化：{review_data['reflect_text']}
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(f"""<div class="review-card">
+<h4 style="margin-top:0; color:#ff9500;">📝 昨日深度复盘：第 {review_data['qihao']} 期</h4>
+<div style="margin-bottom:10px; font-size:16px;">实际开奖：<b style="color:#007aff; font-size:20px;">{review_data['actual_code']}</b> (和值 {review_data['actual_sum']}, 跨度 {review_data['actual_span']}, 冷{review_data['cold_cnt']}/热{review_data['hot_cnt']})</div>
+<div style="background:#fff; padding:10px; border-radius:8px;">{analysis_html}</div>
+{insp_html}
+<div style="margin-top:10px; font-weight:bold; color:#28cd41;">🧠 策略进化：{review_data['reflect_text']}</div>
+</div>""", unsafe_allow_html=True)
 else:
     st.info(f"当前基准: 第 {latest_qihao} 期。正在使用基础策略权重。")
 
@@ -479,21 +465,19 @@ with col_left:
         
         target_col = c_pick1 if i % 2 == 0 else c_pick2
         with target_col:
-            st.markdown(f"""
-            <div class="apple-card">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                    <div class="pick-number">{code}</div> <div>{status}</div>
-                </div>
-                <div class="reason-text">💡 {reasons[i]}</div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"""<div class="apple-card">
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+<div class="pick-number">{code}</div> <div>{status}</div>
+</div>
+<div class="reason-text">💡 {reasons[i]}</div>
+</div>""", unsafe_allow_html=True)
 
     st.markdown("### 💡 灵感号码池")
     if "extra_picks" not in st.session_state: st.session_state.extra_picks = ([], [])
     if st.button("🔄 刷新灵感池", use_container_width=True):
         new_picks, new_reasons = generate_picks_core(df, current_weights, num_picks=5, is_extra=True)
         st.session_state.extra_picks = (new_picks, new_reasons)
-        save_inspiration_picks(target_qihao, new_picks) # 刷新即入库记录！
+        save_inspiration_picks(target_qihao, new_picks) 
     
     extra_picks, extra_reasons = st.session_state.extra_picks
     if extra_picks:
@@ -504,15 +488,13 @@ with col_left:
             
             target_col = c_ex1 if i % 2 == 0 else c_ex2
             with target_col:
-                st.markdown(f"""
-                <div class="apple-card" style="padding: 8px 12px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <div style="font-size:22px; font-weight:bold; color:#007aff;">{code}</div>
-                        <div style="font-size:11px; color:#86868b;">{gap_text}</div>
-                    </div>
-                    <div style="font-size:11px; color:#666;">{reason}</div>
-                </div>
-                """, unsafe_allow_html=True)
+                st.markdown(f"""<div class="apple-card" style="padding: 8px 12px;">
+<div style="display:flex; justify-content:space-between; align-items:center;">
+<div style="font-size:22px; font-weight:bold; color:#007aff;">{code}</div>
+<div style="font-size:11px; color:#86868b;">{gap_text}</div>
+</div>
+<div style="font-size:11px; color:#666;">{reason}</div>
+</div>""", unsafe_allow_html=True)
     else:
         st.info("点击上方按钮生成灵感号码。每次点击都会生成 5 注并记录在云端，供明日复盘使用。")
 
@@ -521,27 +503,17 @@ with col_right:
     st.markdown("### 🌡️ 下一期冷热形态预测")
     trend_msg, ratio_msg, colds, warms, hots = predict_next_cold_hot(df)
     
-    st.markdown(f"""
-    <div style="background:#fff; padding:15px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.03); margin-bottom:15px;">
-        <div style="font-size:15px; color:#ff9500; font-weight:bold; margin-bottom:8px;">🔮 趋势洞察</div>
-        <div style="margin-bottom:10px;">{trend_msg}</div>
-        <div style="background:#e8f8ee; display:inline-block; padding:4px 12px; border-radius:20px; color:#28cd41; font-weight:bold; font-size:14px;">{ratio_msg}</div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(f"""<div style="background:#fff; padding:15px; border-radius:12px; box-shadow:0 4px 12px rgba(0,0,0,0.03); margin-bottom:15px;">
+<div style="font-size:15px; color:#ff9500; font-weight:bold; margin-bottom:8px;">🔮 趋势洞察</div>
+<div style="margin-bottom:10px;">{trend_msg}</div>
+<div style="background:#e8f8ee; display:inline-block; padding:4px 12px; border-radius:20px; color:#28cd41; font-weight:bold; font-size:14px;">{ratio_msg}</div>
+</div>""", unsafe_allow_html=True)
     
-    st.markdown(f"""
-    <div style="display:flex; gap:10px; margin-bottom:15px;">
-        <div style="flex:1; background:#e0f7fa; padding:10px; border-radius:8px; text-align:center;">
-            <b style="color:#00bcd4;">❄️ 冷号池</b><br>{', '.join(colds) if colds else '无'}
-        </div>
-        <div style="flex:1; background:#f1f8e9; padding:10px; border-radius:8px; text-align:center;">
-            <b style="color:#8bc34a;">🌤️ 温号池</b><br>{', '.join(warms) if warms else '无'}
-        </div>
-        <div style="flex:1; background:#fbe9e7; padding:10px; border-radius:8px; text-align:center;">
-            <b style="color:#ff5722;">🔥 热号池</b><br>{', '.join(hots) if hots else '无'}
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown(f"""<div style="display:flex; gap:10px; margin-bottom:15px;">
+<div style="flex:1; background:#e0f7fa; padding:10px; border-radius:8px; text-align:center;"><b style="color:#00bcd4;">❄️ 冷号池</b><br>{', '.join(colds) if colds else '无'}</div>
+<div style="flex:1; background:#f1f8e9; padding:10px; border-radius:8px; text-align:center;"><b style="color:#8bc34a;">🌤️ 温号池</b><br>{', '.join(warms) if warms else '无'}</div>
+<div style="flex:1; background:#fbe9e7; padding:10px; border-radius:8px; text-align:center;"><b style="color:#ff5722;">🔥 热号池</b><br>{', '.join(hots) if hots else '无'}</div>
+</div>""", unsafe_allow_html=True)
 
     st.markdown("### 📊 重号概率统计")
     show_repeat_details = st.toggle("显示重复号码明细", value=False, key="toggle_repeat")
@@ -664,23 +636,23 @@ cons_text = "<br>".join(['· ' + c for c in cons]) if cons else "· 无"
 
 eval_html = f"""<div class="eval-card">
 <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e5e5ea; padding-bottom:10px; margin-bottom:15px;">
-    <h4 style="margin:0;">预测号码 <span style="color:#ff3b30;">{custom_code}</span></h4>
-    <div>
-        <span style="font-weight:bold; font-size:14px;">推荐星级：</span> <span class="star-text">{'★'*score}{'☆'*(5-score)}</span>
-        <span style="color:#86868b; font-size:12px; margin-left:10px;">近千期开出 {count} 次</span>
-    </div>
+<h4 style="margin:0;">预测号码 <span style="color:#ff3b30;">{custom_code}</span></h4>
+<div>
+<span style="font-weight:bold; font-size:14px;">推荐星级：</span> <span class="star-text">{'★'*score}{'☆'*(5-score)}</span>
+<span style="color:#86868b; font-size:12px; margin-left:10px;">近千期开出 {count} 次</span>
+</div>
 </div>
 <div style="display:flex; gap:15px;">
-    <div style="flex:1; background:#f5f5f7; padding:12px; border-radius:8px; font-size:13px;">
-        <b>📍 位置遗漏</b><br>
-        百位: {miss[0]} 期<br>十位: {miss[1]} 期<br>个位: {miss[2]} 期
-    </div>
-    <div style="flex:1; background:#e8f8ee; padding:12px; border-radius:8px; color:#28cd41; font-size:13px;">
-        <b>✅ 优势</b><br>{pros_text}
-    </div>
-    <div style="flex:1; background:#fff4e6; padding:12px; border-radius:8px; color:#ff9500; font-size:13px;">
-        <b>⚠️ 风险</b><br>{cons_text}
-    </div>
+<div style="flex:1; background:#f5f5f7; padding:12px; border-radius:8px; font-size:13px;">
+<b>📍 位置遗漏</b><br>
+百位: {miss[0]} 期<br>十位: {miss[1]} 期<br>个位: {miss[2]} 期
+</div>
+<div style="flex:1; background:#e8f8ee; padding:12px; border-radius:8px; color:#28cd41; font-size:13px;">
+<b>✅ 优势</b><br>{pros_text}
+</div>
+<div style="flex:1; background:#fff4e6; padding:12px; border-radius:8px; color:#ff9500; font-size:13px;">
+<b>⚠️ 风险</b><br>{cons_text}
+</div>
 </div>
 </div>"""
 
