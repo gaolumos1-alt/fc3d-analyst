@@ -62,9 +62,6 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(0,0,0,0.04);
         font-size: 14px;
     }
-    .review-row { margin-bottom: 6px; border-bottom: 1px dashed #e5e5ea; padding-bottom: 6px; }
-    .review-row:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
-    
     .eval-card {
         background-color: #ffffff;
         border-radius: 16px;
@@ -144,7 +141,6 @@ def load_data_from_db():
     df["完整号码"] = df["百位"] + df["十位"] + df["个位"]
     df["开奖日期"] = pd.to_datetime(df["开奖日期"], errors='coerce')
     
-    # 预先计算形态属性
     def get_shape(code):
         nums = sorted([int(c) for c in code])
         if len(set(nums)) == 1: return "豹子"
@@ -182,8 +178,6 @@ def review_and_optimize(df):
 
     picks = record["picks"].split(", ")
     actual_code = latest_row["完整号码"]
-    
-    # 分析开奖号冷热
     recent_100 = df.iloc[1:101]
     freq_counter = Counter()
     for _, r in recent_100.iterrows():
@@ -196,7 +190,6 @@ def review_and_optimize(df):
         if f <= 5: cold_cnt += 1
         elif f >= 12: hot_cnt += 1
 
-    # 深度比对报告
     actual_sum, actual_span = latest_row["和值"], latest_row["跨度"]
     detailed_analysis = []
     for p in picks:
@@ -218,7 +211,6 @@ def review_and_optimize(df):
         analysis_str += f"跨度 {p_span} (开奖 {actual_span})。"
         detailed_analysis.append(analysis_str)
 
-    # 策略进化
     new_weights = last_weights.copy()
     if cold_cnt >= 2:
         new_weights["cold"] = min(0.40, new_weights["cold"] + 0.02)
@@ -241,21 +233,19 @@ def review_and_optimize(df):
 
 # ========== 预测与评估功能 ==========
 def predict_next_cold_hot(df):
-    """分析下一期的冷温热形态预测"""
+    """修复冷热池 Bug 后的预测函数"""
     recent_100 = df.head(100)
     freq_counter = Counter()
     for _, r in recent_100.iterrows():
         for c in ["百位", "十位", "个位"]: freq_counter[r[c]] += 1
             
-    cold_pool, warm_pool, hot_pool = set(), set(), set()
-    for i in range(10):
-        num = str(i)
-        f = freq_counter.get(num, 0)
-        if f <= 5: cold_pool.add(num)
-        elif f >= 12: hot_pool.add(num)
-        else: warm_pool.add(num)
-        
-    # 根据最近10期的走势预测
+    freqs = [(str(i), freq_counter.get(str(i), 0)) for i in range(10)]
+    freqs_sorted = sorted(freqs, key=lambda x: x[1])
+    
+    cold_pool = [num for num, f in freqs_sorted[:3]]
+    warm_pool = [num for num, f in freqs_sorted[3:7]]
+    hot_pool = [num for num, f in freqs_sorted[7:]]
+    
     recent_10 = df.head(10)
     recent_cold_cnt = sum(1 for _, r in recent_10.iterrows() for c in ["百位", "十位", "个位"] if r[c] in cold_pool)
     
@@ -266,7 +256,7 @@ def predict_next_cold_hot(df):
         trend_msg = "冷号回补周期可能即将到来，下期建议关注**冷号回补**。"
         advise_ratio = "建议配比：2冷 + 1温"
         
-    return trend_msg, advise_ratio, sorted(list(cold_pool)), sorted(list(warm_pool)), sorted(list(hot_pool))
+    return trend_msg, advise_ratio, sorted(cold_pool), sorted(warm_pool), sorted(hot_pool)
 
 def evaluate_custom_number(df, code):
     nums = [int(c) for c in code]
@@ -316,12 +306,14 @@ def generate_picks_core(df, current_weights, num_picks=5, is_extra=False):
     recent_df = df.head(RECENT_ANALYZE)
     avg_sum = sum(int(r["百位"]) + int(r["十位"]) + int(r["个位"]) for _, r in recent_df.iterrows()) / RECENT_ANALYZE
     
+    # 修复：采用分位频率排序来划分冷温热池
     hot_pool, cold_pool, warm_pool = {}, {}, {}
     for col in ["百位", "十位", "个位"]:
         counts = Counter(recent_df[col].tolist())
-        hot_pool[col] = [n for n, _ in counts.most_common(4)]
-        cold_pool[col] = [n for n, c in counts.items() if c <= 5] or [str(i) for i in range(10) if str(i) not in hot_pool[col]][:3]
-        warm_pool[col] = [str(i) for i in range(10) if str(i) not in hot_pool[col] and str(i) not in cold_pool[col]]
+        sorted_counts = sorted([(str(i), counts.get(str(i), 0)) for i in range(10)], key=lambda x: x[1])
+        cold_pool[col] = [n for n, _ in sorted_counts[:3]]
+        warm_pool[col] = [n for n, _ in sorted_counts[3:7]]
+        hot_pool[col] = [n for n, _ in sorted_counts[7:]]
 
     picks, reasons = [], []
     attempts = 0
@@ -526,7 +518,6 @@ st.divider()
 
 # ================= Row 3: 宽幅走势图与形态表 =================
 st.markdown("### 📈 深度走势分析 (近30期)")
-# 左侧走势图占 3 份，右侧形态表占 1 份
 col_chart, col_shape = st.columns([3, 1], gap="small")
 
 with col_chart:
@@ -536,30 +527,37 @@ with col_chart:
 
     y_axis = alt.Y('期号简写:N', sort=chart_data['期号简写'].tolist(), axis=alt.Axis(labelAngle=0, labelOverlap=False, tickCount=chart_data.shape[0]))
     melted_df = chart_data.melt(id_vars=['期号简写'], value_vars=['百位', '十位', '个位'], var_name='位置', value_name='数值')
-    x_axis = alt.X('数值:Q', scale=alt.Scale(domain=[-0.5, 9.5]), axis=alt.Axis(values=list(range(10))))
     
-    chart = alt.Chart(melted_df).mark_line(point=alt.OverlayMarkDef(size=40, filled=True, stroke='white', strokeWidth=2), strokeWidth=2).encode(
+    # 核心修改：将百、十、个位横向偏移，形成3组独立的0-9坐标
+    melted_df['x_pos'] = melted_df.apply(lambda r: r['数值'] if r['位置']=='百位' else (r['数值']+12 if r['位置']=='十位' else r['数值']+24), axis=1)
+    
+    x_axis = alt.X('x_pos:Q', 
+                   scale=alt.Scale(domain=[-1, 34]), 
+                   axis=alt.Axis(
+                       values=[0,1,2,3,4,5,6,7,8,9, 12,13,14,15,16,17,18,19,20,21, 24,25,26,27,28,29,30,31,32,33],
+                       labelExpr="datum.value < 10 ? datum.value : (datum.value < 22 ? datum.value - 12 : datum.value - 24)",
+                       title="号码（百位 | 十位 | 个位）"
+                   ))
+    
+    line_chart = alt.Chart(melted_df).mark_line(point=alt.OverlayMarkDef(size=40, filled=True, stroke='white', strokeWidth=2), strokeWidth=2).encode(
         x=x_axis, y=y_axis, 
         color=alt.Color('位置:N', scale=alt.Scale(domain=['百位', '十位', '个位'], range=['#FF5722', '#00BCD4', '#8BC34A'])),
         tooltip=['期号简写', '位置', '数值']
-    ).properties(height=600, background='transparent').interactive()
+    )
     
-    st.altair_chart(chart, use_container_width=True)
+    # 绘制分隔线和顶部标识
+    vlines = pd.DataFrame({'x': [10.5, 22.5]})
+    vline_chart = alt.Chart(vlines).mark_rule(color='#e5e5ea', strokeWidth=1, strokeDash=[4,4]).encode(x='x:Q')
     
-    # --- 模拟选号区 ---
-    st.markdown("##### 🎯 模拟选号推演")
-    sim_cols = st.columns([1,1,1,3])
-    sim_b = sim_cols[0].selectbox("百位", options=["-"]+[str(i) for i in range(10)], index=0, key="sim_b")
-    sim_s = sim_cols[1].selectbox("十位", options=["-"]+[str(i) for i in range(10)], index=0, key="sim_s")
-    sim_g = sim_cols[2].selectbox("个位", options=["-"]+[str(i) for i in range(10)], index=0, key="sim_g")
+    texts = pd.DataFrame({'x': [4.5, 16.5, 28.5], 'text': ['百位', '十位', '个位']})
+    text_chart = alt.Chart(texts).mark_text(dy=-10, fontWeight='bold', color='#86868b').encode(x='x:Q', text='text:N')
     
-    if sim_b != "-" and sim_s != "-" and sim_g != "-":
-        sim_code = f"{sim_b}{sim_s}{sim_g}"
-        sim_cols[3].markdown(f"<div style='margin-top:28px; font-size:18px;'>模拟号码：<b style='color:#007aff;'>{sim_code}</b> (和值 {int(sim_b)+int(sim_s)+int(sim_g)})</div>", unsafe_allow_html=True)
+    final_chart = (vline_chart + line_chart + text_chart).properties(height=600, background='transparent').interactive()
+    
+    st.altair_chart(final_chart, use_container_width=True)
 
 with col_shape:
     st.markdown("**形态与参数**")
-    # 提取形态表
     shape_df = chart_data[["期号简写", "形态", "和值", "跨度", "奇偶比"]].copy()
     shape_df = shape_df.sort_values("期号简写", ascending=False).reset_index(drop=True)
     shape_df.columns = ["期号", "形态", "和值", "跨度", "奇偶"]
@@ -573,39 +571,49 @@ with col_shape:
 
 st.divider()
 
-# ================= Row 4: 定制号码评估 =================
-st.markdown("### 🔍 定制号码综合评估")
-col_eval_b, col_eval_s, col_eval_g = st.columns(3)
-sel_b = col_eval_b.selectbox("评估百位", options=[str(i) for i in range(10)], key="sb_b")
-sel_s = col_eval_s.selectbox("评估十位", options=[str(i) for i in range(10)], key="sb_s")
-sel_g = col_eval_g.selectbox("评估个位", options=[str(i) for i in range(10)], key="sb_g")
-custom_code = f"{sel_b}{sel_s}{sel_g}"
+# ================= Row 4: 模拟推演与综合评估合并 =================
+st.markdown("### 🎯 模拟推演与综合评估")
+col_sim, col_eval_report = st.columns([1, 2], gap="large")
 
-if st.button("生成综合评估报告", use_container_width=True):
-    score, pros, cons, miss = evaluate_custom_number(df, custom_code)
-    count, _, _ = check_history_appearance(df, custom_code, 1000)
+with col_sim:
+    st.markdown("**自定义选号**")
+    sim_b = st.selectbox("百位", options=[str(i) for i in range(10)], key="sim_b")
+    sim_s = st.selectbox("十位", options=[str(i) for i in range(10)], key="sim_s")
+    sim_g = st.selectbox("个位", options=[str(i) for i in range(10)], key="sim_g")
+    custom_code = f"{sim_b}{sim_s}{sim_g}"
     
-    st.markdown(f"""
-    <div class="eval-card">
-        <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e5e5ea; padding-bottom:10px; margin-bottom:15px;">
-            <h4 style="margin:0;">号码 <span style="color:#007aff;">{custom_code}</span></h4>
-            <div>
-                <span style="font-weight:bold; font-size:14px;">推荐星级：</span> <span class="star-text">{'★'*score}{'☆'*(5-score)}</span>
-                <span style="color:#86868b; font-size:12px; margin-left:10px;">近千期开出 {count} 次</span>
-            </div>
-        </div>
+    st.markdown(f"<div style='font-size:48px; font-weight:bold; color:#007aff; text-align:center; margin-top:20px;'>{custom_code}</div>", unsafe_allow_html=True)
+    sim_sum = int(sim_b)+int(sim_s)+int(sim_g)
+    st.markdown(f"<div style='text-align:center; color:#86868b; font-size:16px;'>和值: {sim_sum}</div>", unsafe_allow_html=True)
+
+with col_eval_report:
+    if st.button("生成/刷新评估报告", use_container_width=True):
+        score, pros, cons, miss = evaluate_custom_number(df, custom_code)
+        count, _, _ = check_history_appearance(df, custom_code, 1000)
         
-        <div style="display:flex; gap:15px;">
-            <div style="flex:1; background:#f5f5f7; padding:12px; border-radius:8px; font-size:13px;">
-                <b>📍 位置遗漏</b><br>
-                百位: {miss[0]} 期<br>十位: {miss[1]} 期<br>个位: {miss[2]} 期
+        st.markdown(f"""
+        <div class="eval-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e5e5ea; padding-bottom:10px; margin-bottom:15px;">
+                <h4 style="margin:0;">号码 <span style="color:#007aff;">{custom_code}</span></h4>
+                <div>
+                    <span style="font-weight:bold; font-size:14px;">推荐星级：</span> <span class="star-text">{'★'*score}{'☆'*(5-score)}</span>
+                    <span style="color:#86868b; font-size:12px; margin-left:10px;">近千期开出 {count} 次</span>
+                </div>
             </div>
-            <div style="flex:1; background:#e8f8ee; padding:12px; border-radius:8px; color:#28cd41; font-size:13px;">
-                <b>✅ 优势</b><br>{"<br>".join(['· ' + p for p in pros]) if pros else '· 无'}
-            </div>
-            <div style="flex:1; background:#fff4e6; padding:12px; border-radius:8px; color:#ff9500; font-size:13px;">
-                <b>⚠️ 风险</b><br>{"<br>".join(['· ' + c for c in cons]) if cons else '· 无'}
+            
+            <div style="display:flex; gap:15px;">
+                <div style="flex:1; background:#f5f5f7; padding:12px; border-radius:8px; font-size:13px;">
+                    <b>📍 位置遗漏</b><br>
+                    百位: {miss[0]} 期<br>十位: {miss[1]} 期<br>个位: {miss[2]} 期
+                </div>
+                <div style="flex:1; background:#e8f8ee; padding:12px; border-radius:8px; color:#28cd41; font-size:13px;">
+                    <b>✅ 优势</b><br>{"<br>".join(['· ' + p for p in pros]) if pros else '· 无'}
+                </div>
+                <div style="flex:1; background:#fff4e6; padding:12px; border-radius:8px; color:#ff9500; font-size:13px;">
+                    <b>⚠️ 风险</b><br>{"<br>".join(['· ' + c for c in cons]) if cons else '· 无'}
+                </div>
             </div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+    else:
+        st.info("请在左侧选号，然后点击上方按钮生成综合评估报告。")
