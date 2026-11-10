@@ -3,4 +3,4 @@ pandas
 requests
 openpyxl
 altair
-supabase
+supabase==2.1.4
