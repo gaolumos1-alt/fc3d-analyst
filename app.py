@@ -4,10 +4,10 @@ import pandas as pd
 import time
 import random
 import json
-import io
 import altair as alt
 from datetime import datetime
 from collections import Counter
+from supabase import create_client, Client
 
 # ================= 配置区 =================
 API_URL = "http://api.huiniao.top/interface/home/lotteryHistory"
@@ -15,12 +15,20 @@ LOTTERY_TYPE = "fcsd"
 EXCLUDE_RANGE = 100    
 RECENT_ANALYZE = 100   
 
+# 初始化 Supabase
+@st.cache_resource
+def init_supabase() -> Client:
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+supabase = init_supabase()
+
 st.set_page_config(page_title="福彩3D 智能分析", page_icon="🎯", layout="centered")
 
 # ================= 苹果明亮风 + 马卡龙晕染 + 组件深度美化 CSS =================
 st.markdown("""
 <style>
-    /* 强制全局浅灰背景与马卡龙晕染 */
     .stApp {
         background-color: #fbfbfd;
         background-image: 
@@ -30,54 +38,18 @@ st.markdown("""
             radial-gradient(circle at 20% 80%, rgba(255, 228, 196, 0.3) 0%, transparent 50%);
         background-attachment: fixed;
     }
-    
-    /* 强制所有普通文字为深黑色 */
-    body, p, h1, h2, h3, h4, h5, h6, div, span {
-        color: #1d1d1f !important;
-    }
-    
-    /* ======= 侧边栏与上传组件美化 ======= */
+    body, p, h1, h2, h3, h4, h5, h6, div, span { color: #1d1d1f !important; }
     [data-testid="stSidebar"] {
         background-color: rgba(255, 255, 255, 0.7) !important;
         backdrop-filter: blur(20px);
         border-right: 1px solid rgba(0,0,0,0.05);
     }
-    [data-testid="stFileUploader"] {
-        background-color: #ffffff !important;
-        border-radius: 12px;
-        padding: 10px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.03);
-    }
-    [data-testid="stFileUploader"] section {
-        background-color: #f5f5f7 !important;
-        border: 1px dashed #007aff !important;
-    }
-    [data-testid="stFileUploader"] small { color: #86868b !important; }
-    
-    /* 下载按钮美化 */
-    [data-testid="stDownloadButton"] button {
-        background-color: #007aff !important;
-        color: #ffffff !important;
-        border-radius: 12px;
-        font-weight: 600;
-        border: none;
-        transition: all 0.3s;
-    }
-    [data-testid="stDownloadButton"] button:hover {
-        background-color: #005bb5 !important;
-        box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
-    }
-    
-    /* ======= 单选按钮 (走势图切换) 美化 ======= */
     [data-testid="stRadio"] > div {
         background-color: #ffffff !important;
         padding: 10px;
         border-radius: 12px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.03);
     }
-    .stRadio [data-baseweb="radio"] div { color: #1d1d1f !important; }
-    
-    /* ======= 重号统计指标卡美化 ======= */
     [data-testid="stMetric"] {
         background-color: rgba(255, 255, 255, 0.9) !important;
         padding: 15px;
@@ -87,16 +59,11 @@ st.markdown("""
     }
     [data-testid="stMetricValue"] { color: #1d1d1f !important; font-weight: 800; font-size: 28px; }
     [data-testid="stMetricLabel"] { color: #86868b !important; }
-
-    /* ======= 顶部 Info 框美化 ======= */
     .stInfo {
         background-color: #ffffff !important;
         border: 1px solid #e5e5ea !important;
         border-radius: 14px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.02);
     }
-
-    /* ======= 本期推荐卡片美化 ======= */
     .apple-card {
         background-color: #ffffff;
         border-radius: 16px;
@@ -105,39 +72,19 @@ st.markdown("""
         box-shadow: 0 8px 24px rgba(0,0,0,0.05);
         border: 1px solid #e5e5ea;
     }
-    .apple-title {
-        font-size: 15px;
-        font-weight: 600;
-        color: #86868b !important;
-        margin-bottom: 8px;
-    }
+    .apple-title { font-size: 15px; font-weight: 600; color: #86868b !important; margin-bottom: 8px; }
     .pick-number {
-        font-size: 48px;
-        font-weight: 800;
-        color: #007aff !important;
-        letter-spacing: 8px;
-        margin-bottom: 12px;
-        font-family: -apple-system, BlinkMacSystemFont, monospace;
+        font-size: 48px; font-weight: 800; color: #007aff !important;
+        letter-spacing: 8px; margin-bottom: 12px; font-family: monospace;
     }
-    .reason-text {
-        font-size: 14px;
-        color: #1d1d1f !important;
-        line-height: 1.5;
-        margin-top: 10px;
-    }
-    .badge {
-        display: inline-block;
-        padding: 6px 12px;
-        border-radius: 20px;
-        font-size: 13px;
-        font-weight: 600;
-    }
+    .reason-text { font-size: 14px; color: #1d1d1f !important; line-height: 1.5; margin-top: 10px; }
+    .badge { display: inline-block; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: 600; }
     .badge-success { background-color: #e8f8ee; color: #28cd41 !important; }
     .badge-warning { background-color: #fff4e6; color: #ff9500 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ========== 核心抓取与合并逻辑 ==========
+# ========== 核心抓取与数据库同步逻辑 ==========
 @st.cache_data(ttl=3600)
 def fetch_page(page, limit=100):
     params = {"type": LOTTERY_TYPE, "page": page, "limit": limit}
@@ -151,26 +98,50 @@ def fetch_page(page, limit=100):
         pass
     return []
 
-def process_data(raw_list):
-    if not raw_list: return pd.DataFrame()
-    df = pd.DataFrame(raw_list)
-    mapping = {"code": "期号", "day": "开奖日期", "one": "百位", "two": "十位", "three": "个位"}
-    cols = {k: v for k, v in mapping.items() if k in df.columns}
-    df = df[list(cols.keys())].rename(columns=cols)
+def sync_database():
+    """从接口拉取最新数据，写入 Supabase 云端数据库"""
+    # 1. 获取数据库已有的最大期号（只取1条最新记录）
+    res = supabase.table("lottery_history").select("qihao").order("qihao", desc=True).limit(1).execute()
     
-    pos_cols = ["百位", "十位", "个位"]
-    for col in pos_cols:
-        if col in df.columns:
-            df[col] = df[col].astype(str)
-            
-    if all(col in df.columns for col in pos_cols):
-        df["完整号码"] = df[pos_cols].apply(lambda x: "".join(x.astype(str)), axis=1)
-        
-    if "期号" in df.columns:
-        df["期号"] = df["期号"].astype(str)
-        if "开奖日期" in df.columns:
-            df["开奖日期"] = pd.to_datetime(df["开奖日期"], errors='coerce')
-        df = df.sort_values("期号", ascending=False).reset_index(drop=True)
+    if not res.data:
+        # 如果是空库，全量抓取
+        st.info("首次运行：正在初始化云端数据库，全量抓取历史数据（约需几十秒）...")
+        all_raw = []
+        page = 1
+        while True:
+            data = fetch_page(page)
+            if not data: break
+            all_raw.extend(data)
+            if len(data) < 100: break
+            page += 1
+        records = [
+            {"qihao": d["code"], "riqi": d["day"], "bai": str(d["one"]), "shi": str(d["two"]), "ge": str(d["three"])}
+            for d in all_raw
+        ]
+    else:
+        # 如果已有数据，增量抓取前2页
+        max_qihao = res.data[0]["qihao"]
+        new_raw = fetch_page(1) + fetch_page(2)
+        records = [
+            {"qihao": d["code"], "riqi": d["day"], "bai": str(d["one"]), "shi": str(d["two"]), "ge": str(d["three"])}
+            for d in new_raw if d["code"] > max_qihao
+        ]
+
+    if records:
+        # 批量写入/更新云端 (upsert)
+        supabase.table("lottery_history").upsert(records).execute()
+        # 清理缓存以显示最新数据
+        st.cache_data.clear()
+
+def load_data_from_db():
+    """从数据库分页拉取所有数据，转为 DataFrame"""
+    res = supabase.table("lottery_history").select("*").order("qihao", desc=True).execute()
+    df = pd.DataFrame(res.data)
+    if df.empty: return pd.DataFrame()
+    
+    df = df.rename(columns={"qihao": "期号", "riqi": "开奖日期", "bai": "百位", "shi": "十位", "ge": "个位"})
+    df["完整号码"] = df["百位"] + df["十位"] + df["个位"]
+    df["开奖日期"] = pd.to_datetime(df["开奖日期"], errors='coerce')
     return df
 
 # ========== 进阶分析算法 ==========
@@ -206,7 +177,7 @@ def get_missing_values(df, col_name, lookback=100):
         missing[num_str] = lookback if matches.empty else matches.index[0]
     return dict(sorted(missing.items(), key=lambda item: item[1], reverse=True))
 
-# ========== 推荐生成逻辑 ==========
+# ========== 推荐生成与数据库读取逻辑 ==========
 def generate_reverse_picks(df, current_weights):
     exclude_set = set(df.head(EXCLUDE_RANGE)["完整号码"].tolist())
     recent_df = df.head(RECENT_ANALYZE)
@@ -257,53 +228,24 @@ def generate_reverse_picks(df, current_weights):
 
 # ================= 页面 UI 渲染 =================
 st.title("🎯 福彩3D 智能分析终端")
-st.caption("马卡龙明亮风格 | 竖向定位走势 | 重号明细追踪")
+st.caption("云端全自动托管 | 马卡龙明亮风格 | 重号明细追踪")
 
 with st.sidebar:
-    st.header("📂 数据同步")
-    uploaded_file = st.file_uploader("上传昨天下载的 Excel", type=["xlsx"])
-    st.markdown("---")
     st.header("🔍 号码查重 (近1000期)")
     search_code = st.text_input("输入3位数字", max_chars=3)
+    st.markdown("---")
+    if st.button("🔄 手动触发云端数据同步", use_container_width=True):
+        sync_database()
+        st.success("同步成功！")
 
-# 数据加载
-df = pd.DataFrame()
-strategy_history = []
+# 1. 自动同步最新数据并加载
+with st.spinner("正在同步云端数据库..."):
+    sync_database()
+    df = load_data_from_db()
 
-if uploaded_file is not None:
-    try:
-        xls = pd.ExcelFile(uploaded_file)
-        df = pd.read_excel(xls, sheet_name="开奖数据", dtype={'期号': str})
-        if "开奖日期" in df.columns:
-            df["开奖日期"] = pd.to_datetime(df["开奖日期"])
-        if "策略记录" in xls.sheet_names:
-            strategy_history = pd.read_excel(xls, sheet_name="策略记录").to_dict('records')
-        st.sidebar.success("✅ 历史记忆已载入")
-    except Exception as e:
-        st.sidebar.error(f"文件解析失败: {e}")
-        st.stop()
-else:
-    with st.spinner("正在初始化全量数据..."):
-        all_raw = []
-        page = 1
-        while True:
-            data = fetch_page(page)
-            if not data: break
-            all_raw.extend(data)
-            if len(data) < 100: break
-            page += 1
-        df = process_data(all_raw)
-
-if df.empty: st.stop()
-
-# 增量更新
-with st.spinner("更新最新数据..."):
-    new_raw = fetch_page(1) + fetch_page(2)
-    new_df = process_data(new_raw)
-    if not new_df.empty:
-        combined = pd.concat([new_df, df], ignore_index=True)
-        combined = combined.drop_duplicates(subset=["期号"], keep="first")
-        df = combined.sort_values("期号", ascending=False).reset_index(drop=True)
+if df.empty: 
+    st.error("云端数据为空，请稍后刷新重试。")
+    st.stop()
 
 latest_row = df.iloc[0]
 latest_qihao = latest_row["期号"]
@@ -319,8 +261,6 @@ if search_code and len(search_code) == 3 and search_code.isdigit():
 # ================= 模块：重号统计 =================
 st.markdown("### 📊 近期重号概率统计")
 st.caption("统计：在选定周期内，开出2次及以上的号码数量及比例。")
-
-# 增加开关查看重号明细
 show_repeat_details = st.toggle("显示重复号码明细", value=False)
 
 c1, c2, c3, c4 = st.columns(4)
@@ -343,32 +283,21 @@ if show_repeat_details:
             st.write(f"**近 {window} 期**")
             dup_series = dup_data_store[window]
             if not dup_series.empty:
-                dup_df = pd.DataFrame({
-                    "号码": dup_series.index,
-                    "出现次数": dup_series.values
-                }).sort_values(by="出现次数", ascending=False)
+                dup_df = pd.DataFrame({"号码": dup_series.index, "出现次数": dup_series.values}).sort_values(by="出现次数", ascending=False)
                 st.dataframe(dup_df, hide_index=True, use_container_width=True)
             else:
                 st.write("无重复号码")
 
-
-# ================= 模块：竖向走势图 (向负Y轴更新) =================
+# ================= 模块：竖向走势图 =================
 st.markdown("### 📈 定位走势图 (右图模式)")
-st.caption("X轴为数字0-9，Y轴为期号（从上往下）。通过连线观察号码跳跃轨迹。")
+st.caption("X轴为数字0-9，Y轴为期号（从上往下）。")
 view_mode = st.radio("选择位置：", ["综合走势", "百位", "十位", "个位"], horizontal=True)
 
-# 取最近 30 期，按时间正序（最旧的在上，最新的在下，满足向负Y轴更新）
 chart_data = df.head(30).copy().sort_values("期号", ascending=True)
-chart_data["期号"] = chart_data["期号"].astype(str)
-chart_data["期号简写"] = chart_data["期号"].str[-3:]
+chart_data["期号简写"] = chart_data["期号"].astype(str).str[-3:]
 chart_data["百位"] = chart_data["百位"].astype(int)
 chart_data["十位"] = chart_data["十位"].astype(int)
 chart_data["个位"] = chart_data["个位"].astype(int)
-
-# 设置统一的背景和轴颜色
-chart_base_config = dict(
-    background='transparent',
-)
 
 y_axis = alt.Y('期号简写:N', title='期号', sort=chart_data['期号简写'].tolist(), axis=alt.Axis(labelAngle=0, labelColor='#1d1d1f', titleColor='#1d1d1f'))
 
@@ -378,52 +307,56 @@ if view_mode == "综合走势":
     x_axis = alt.X('数值:Q', title='号码', scale=alt.Scale(domain=[-0.5, 9.5]), axis=alt.Axis(values=list(range(10)), labelColor='#1d1d1f', titleColor='#1d1d1f'))
     
     chart = alt.Chart(melted_df).mark_line(point=alt.OverlayMarkDef(size=60, filled=True, stroke='white', strokeWidth=2), strokeWidth=3).encode(
-        x=x_axis, y=y_axis, color=alt.Color('位置:N', scale=color_scale),
-        tooltip=['期号简写', '位置', '数值']
-    ).properties(height=550, **chart_base_config).interactive()
+        x=x_axis, y=y_axis, color=alt.Color('位置:N', scale=color_scale), tooltip=['期号简写', '位置', '数值']
+    ).properties(height=550, background='transparent').interactive()
 else:
-    col_map = {"百位": "百位", "十位": "十位", "个位": "个位"}
-    target_col = col_map[view_mode]
+    target_col = view_mode
     color = '#FF5722' if view_mode == "百位" else '#00BCD4' if view_mode == "十位" else '#8BC34A'
-    # 【修复】X 轴动态指定为目标列
     x_axis_single = alt.X(f'{target_col}:Q', title='号码', scale=alt.Scale(domain=[-0.5, 9.5]), axis=alt.Axis(values=list(range(10)), labelColor='#1d1d1f', titleColor='#1d1d1f'))
     
     chart = alt.Chart(chart_data).mark_line(point=alt.OverlayMarkDef(size=70, filled=True, color=color, stroke='white', strokeWidth=2), strokeWidth=4, color=color).encode(
         x=x_axis_single, y=y_axis, tooltip=['期号简写', alt.Tooltip(f'{target_col}:Q', title='数值')]
-    ).properties(height=550, **chart_base_config).interactive()
+    ).properties(height=550, background='transparent').interactive()
 
 st.altair_chart(chart, use_container_width=True)
 
 
-# ================= 模块：精选推荐 =================
+# ================= 模块：精选推荐 (直接读写云端) =================
 st.markdown("### 🎯 今日精选推荐")
 
 target_qihao = str(int(latest_qihao) + 1) if latest_qihao.isdigit() else latest_qihao + "_next"
-today_record = next((r for r in strategy_history if r["target_qihao"] == target_qihao), None)
+
+# 从数据库查找是否已经生成过
+res = supabase.table("strategy_records").select("*").eq("target_qihao", target_qihao).execute()
+today_record = res.data[0] if res.data else None
 
 if today_record:
-    st.success(f"今日推荐已固定 (针对第 {target_qihao} 期)。上传新文件前，刷新页面结果不变。")
+    st.success(f"今日推荐已固定 (针对第 {target_qihao} 期)，云端已记住，刷新不变。")
     picks = today_record["picks"].split(", ")
-    reasons = today_record.get("reasons", ["历史无原因"] * 5).split(" | ") if isinstance(today_record.get("reasons"), str) else ["历史无原因"] * 5
+    reasons = today_record["reasons"].split(" | ")
 else:
-    current_weights = strategy_history[-1] if strategy_history else {"cold": 0.30, "hot": 0.10}
-    if isinstance(current_weights, dict) and "weights_cold" in current_weights:
-        current_weights = {"cold": current_weights["weights_cold"], "hot": current_weights["weights_hot"]}
+    # 如果没生成过，获取上次的权重
+    res_last = supabase.table("strategy_records").select("weights_cold, weights_hot").order("id", desc=True).limit(1).execute()
+    if res_last.data:
+        current_weights = {"cold": res_last.data[0]["weights_cold"], "hot": res_last.data[0]["weights_hot"]}
+    else:
+        current_weights = {"cold": 0.30, "hot": 0.10}
         
     picks, reasons = generate_reverse_picks(df, current_weights)
-    strategy_history.append({
+    
+    # 自动写入云端数据库
+    supabase.table("strategy_records").insert({
         "date": datetime.now().strftime("%Y-%m-%d %H:%M"), 
         "target_qihao": target_qihao, 
         "picks": ", ".join(picks),
         "reasons": " | ".join(reasons),
         "weights_cold": current_weights["cold"],
         "weights_hot": current_weights["hot"]
-    })
-    st.success(f"已生成针对第 {target_qihao} 期的新推荐！请下载保存。")
+    }).execute()
+    st.success(f"已生成针对第 {target_qihao} 期的新推荐，并自动保存至云端！")
 
 for i, code in enumerate(picks):
     count, periods, dates = check_history_appearance(df, code, 1000)
-    
     status_html = f"<span class='badge badge-warning'>⚠️ 近千期出现 {count} 次</span>" if count > 0 else "<span class='badge badge-success'>✨ 近千期未开出</span>"
     history_html = f"<div style='font-size:13px; color:#86868b; margin-top:12px;'>最近出现: {', '.join(dates[:3])}...</div>" if count > 0 else ""
     
@@ -440,30 +373,6 @@ for i, code in enumerate(picks):
 # ================= 模块：缺失分析 =================
 with st.expander("🔍 分位遗漏深度分析 (寻找冷号)", expanded=False):
     c1, c2, c3 = st.columns(3)
-    with c1:
-        st.write("**百位**")
-        st.write(get_missing_values(df, "百位"))
-    with c2:
-        st.write("**十位**")
-        st.write(get_missing_values(df, "十位"))
-    with c3:
-        st.write("**个位**")
-        st.write(get_missing_values(df, "个位"))
-
-# ================= 侧边栏：下载 =================
-with st.sidebar:
-    st.markdown("---")
-    st.header("💾 保存记忆")
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, sheet_name="开奖数据", index=False)
-        if strategy_history:
-            pd.DataFrame(strategy_history).to_excel(writer, sheet_name="策略记录", index=False)
-            
-    st.download_button(
-        label="⬇️ 下载最新 Excel",
-        data=output.getvalue(),
-        file_name=f"福彩3D_备份_{datetime.now().strftime('%Y%m%d')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True
-    )
+    with c1: st.write("**百位**", get_missing_values(df, "百位"))
+    with c2: st.write("**十位**", get_missing_values(df, "十位"))
+    with c3: st.write("**个位**", get_missing_values(df, "个位"))
