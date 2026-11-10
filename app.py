@@ -3,26 +3,17 @@ import requests
 import pandas as pd
 import time
 import random
-import json
 import altair as alt
 from datetime import datetime
 from collections import Counter
-from supabase import create_client, Client
+import psycopg2
+import psycopg2.extras
 
 # ================= 配置区 =================
 API_URL = "http://api.huiniao.top/interface/home/lotteryHistory"
 LOTTERY_TYPE = "fcsd"  
 EXCLUDE_RANGE = 100    
 RECENT_ANALYZE = 100   
-
-# 初始化 Supabase
-@st.cache_resource
-def init_supabase() -> Client:
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
-
-supabase = init_supabase()
 
 st.set_page_config(page_title="福彩3D 智能分析", page_icon="🎯", layout="centered")
 
@@ -84,7 +75,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ========== 核心抓取与数据库同步逻辑 ==========
+# ========== 核心抓取与 Neon 数据库操作 ==========
 @st.cache_data(ttl=3600)
 def fetch_page(page, limit=100):
     params = {"type": LOTTERY_TYPE, "page": page, "limit": limit}
@@ -98,47 +89,62 @@ def fetch_page(page, limit=100):
         pass
     return []
 
-def sync_database():
-    """从接口拉取最新数据，写入 Supabase 云端数据库"""
-    # 1. 获取数据库已有的最大期号（只取1条最新记录）
-    res = supabase.table("lottery_history").select("qihao").order("qihao", desc=True).limit(1).execute()
-    
-    if not res.data:
-        # 如果是空库，全量抓取
-        st.info("首次运行：正在初始化云端数据库，全量抓取历史数据（约需几十秒）...")
-        all_raw = []
-        page = 1
-        while True:
-            data = fetch_page(page)
-            if not data: break
-            all_raw.extend(data)
-            if len(data) < 100: break
-            page += 1
-        records = [
-            {"qihao": d["code"], "riqi": d["day"], "bai": str(d["one"]), "shi": str(d["two"]), "ge": str(d["three"])}
-            for d in all_raw
-        ]
-    else:
-        # 如果已有数据，增量抓取前2页
-        max_qihao = res.data[0]["qihao"]
-        new_raw = fetch_page(1) + fetch_page(2)
-        records = [
-            {"qihao": d["code"], "riqi": d["day"], "bai": str(d["one"]), "shi": str(d["two"]), "ge": str(d["three"])}
-            for d in new_raw if d["code"] > max_qihao
-        ]
+@st.cache_resource
+def get_db_connection():
+    """创建并缓存 Neon 数据库连接"""
+    db_url = st.secrets["DATABASE_URL"]
+    return psycopg2.connect(db_url, sslmode='require')
 
-    if records:
-        # 批量写入/更新云端 (upsert)
-        supabase.table("lottery_history").upsert(records).execute()
-        # 清理缓存以显示最新数据
-        st.cache_data.clear()
+def sync_database():
+    """从接口拉取最新数据，并写入 Neon 数据库"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT qihao FROM lottery_history ORDER BY qihao DESC LIMIT 1;")
+            res = cur.fetchone()
+            max_qihao = res['qihao'] if res else None
+
+        if max_qihao is None:
+            st.info("首次运行：正在初始化云端数据库，全量抓取历史数据（约需几十秒）...")
+            all_raw = []
+            page = 1
+            while True:
+                data = fetch_page(page)
+                if not data: break
+                all_raw.extend(data)
+                if len(data) < 100: break
+                page += 1
+            records_to_insert = all_raw
+        else:
+            new_raw = fetch_page(1) + fetch_page(2)
+            records_to_insert = [d for d in new_raw if d["code"] > max_qihao]
+
+        if records_to_insert:
+            with conn.cursor() as cur:
+                insert_query = """
+                    INSERT INTO lottery_history (qihao, riqi, bai, shi, ge)
+                    VALUES %s
+                    ON CONFLICT (qihao) DO UPDATE SET
+                        riqi = EXCLUDED.riqi, bai = EXCLUDED.bai, shi = EXCLUDED.shi, ge = EXCLUDED.ge;
+                """
+                values = [(d["code"], d["day"], str(d["one"]), str(d["two"]), str(d["three"])) for d in records_to_insert]
+                psycopg2.extras.execute_values(cur, insert_query, values)
+            conn.commit()
+    finally:
+        conn.close()
 
 def load_data_from_db():
-    """从数据库分页拉取所有数据，转为 DataFrame"""
-    res = supabase.table("lottery_history").select("*").order("qihao", desc=True).execute()
-    df = pd.DataFrame(res.data)
-    if df.empty: return pd.DataFrame()
-    
+    """从 Neon 数据库加载所有数据到 DataFrame"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT qihao, riqi, bai, shi, ge FROM lottery_history ORDER BY qihao DESC;")
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    if not rows: return pd.DataFrame()
+    df = pd.DataFrame(rows)
     df = df.rename(columns={"qihao": "期号", "riqi": "开奖日期", "bai": "百位", "shi": "十位", "ge": "个位"})
     df["完整号码"] = df["百位"] + df["十位"] + df["个位"]
     df["开奖日期"] = pd.to_datetime(df["开奖日期"], errors='coerce')
@@ -177,7 +183,7 @@ def get_missing_values(df, col_name, lookback=100):
         missing[num_str] = lookback if matches.empty else matches.index[0]
     return dict(sorted(missing.items(), key=lambda item: item[1], reverse=True))
 
-# ========== 推荐生成与数据库读取逻辑 ==========
+# ========== 推荐生成逻辑 ==========
 def generate_reverse_picks(df, current_weights):
     exclude_set = set(df.head(EXCLUDE_RANGE)["完整号码"].tolist())
     recent_df = df.head(RECENT_ANALYZE)
@@ -326,33 +332,44 @@ st.markdown("### 🎯 今日精选推荐")
 
 target_qihao = str(int(latest_qihao) + 1) if latest_qihao.isdigit() else latest_qihao + "_next"
 
-# 从数据库查找是否已经生成过
-res = supabase.table("strategy_records").select("*").eq("target_qihao", target_qihao).execute()
-today_record = res.data[0] if res.data else None
+conn = get_db_connection()
+try:
+    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        cur.execute("SELECT * FROM strategy_records WHERE target_qihao = %s;", (target_qihao,))
+        today_record = cur.fetchone()
+finally:
+    conn.close()
 
 if today_record:
     st.success(f"今日推荐已固定 (针对第 {target_qihao} 期)，云端已记住，刷新不变。")
     picks = today_record["picks"].split(", ")
     reasons = today_record["reasons"].split(" | ")
 else:
-    # 如果没生成过，获取上次的权重
-    res_last = supabase.table("strategy_records").select("weights_cold, weights_hot").order("id", desc=True).limit(1).execute()
-    if res_last.data:
-        current_weights = {"cold": res_last.data[0]["weights_cold"], "hot": res_last.data[0]["weights_hot"]}
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT weights_cold, weights_hot FROM strategy_records ORDER BY id DESC LIMIT 1;")
+            last_weights = cur.fetchone()
+    finally:
+        conn.close()
+
+    if last_weights:
+        current_weights = {"cold": last_weights["weights_cold"], "hot": last_weights["weights_hot"]}
     else:
         current_weights = {"cold": 0.30, "hot": 0.10}
         
     picks, reasons = generate_reverse_picks(df, current_weights)
     
-    # 自动写入云端数据库
-    supabase.table("strategy_records").insert({
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M"), 
-        "target_qihao": target_qihao, 
-        "picks": ", ".join(picks),
-        "reasons": " | ".join(reasons),
-        "weights_cold": current_weights["cold"],
-        "weights_hot": current_weights["hot"]
-    }).execute()
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO strategy_records (date, target_qihao, picks, reasons, weights_cold, weights_hot)
+                VALUES (%s, %s, %s, %s, %s, %s);
+            """, (datetime.now().strftime("%Y-%m-%d %H:%M"), target_qihao, ", ".join(picks), " | ".join(reasons), current_weights["cold"], current_weights["hot"]))
+        conn.commit()
+    finally:
+        conn.close()
     st.success(f"已生成针对第 {target_qihao} 期的新推荐，并自动保存至云端！")
 
 for i, code in enumerate(picks):
