@@ -62,6 +62,15 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(0,0,0,0.04);
         font-size: 14px;
     }
+    .insp-hit {
+        background-color: #e8f8ee;
+        border-left: 4px solid #28cd41;
+        padding: 10px;
+        margin-top: 10px;
+        border-radius: 6px;
+        color: #1d1d1f;
+        font-weight: bold;
+    }
     .eval-card {
         background-color: #ffffff;
         border-radius: 16px;
@@ -71,13 +80,11 @@ st.markdown("""
     }
     .star-text { color: #ff9500 !important; font-size: 24px; }
     
-    /* 调整下拉框的位置和样式 */
     div[data-testid="stSelectbox"] > div {
         background-color: #f5f5f7;
         border-radius: 10px;
         border: 1px solid #e5e5ea;
     }
-    /* 为下拉框增加间距对齐图表 */
     .stSelectbox {
         margin-bottom: -10px; 
     }
@@ -163,6 +170,16 @@ def load_data_from_db():
     df["奇偶比"] = df.apply(lambda r: f"{sum(1 for c in [r['百位'], r['十位'], r['个位']] if int(c)%2!=0)}:{3 - sum(1 for c in [r['百位'], r['十位'], r['个位']] if int(c)%2!=0)}", axis=1)
     return df
 
+def save_inspiration_picks(target_qihao, picks):
+    """将当日刷新的灵感号码保存到数据库"""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO inspiration_pool (target_qihao, picks) VALUES (%s, %s);", (target_qihao, ", ".join(picks)))
+        conn.commit()
+    finally:
+        conn.close()
+
 # ========== 核心：深度复盘与策略进化 ==========
 def review_and_optimize(df):
     latest_row = df.iloc[0]
@@ -174,6 +191,10 @@ def review_and_optimize(df):
             record = cur.fetchone()
             cur.execute("SELECT weights_cold, weights_hot FROM strategy_records ORDER BY id DESC LIMIT 1;")
             last_weights_row = cur.fetchone()
+            
+            # 查询当期的所有灵感号码
+            cur.execute("SELECT picks FROM inspiration_pool WHERE target_qihao = %s;", (latest_qihao,))
+            insp_records = cur.fetchall()
     finally:
         conn.close()
 
@@ -189,6 +210,8 @@ def review_and_optimize(df):
 
     picks = record["picks"].split(", ")
     actual_code = latest_row["完整号码"]
+    
+    # 统计冷热
     recent_100 = df.iloc[1:101]
     freq_counter = Counter()
     for _, r in recent_100.iterrows():
@@ -201,6 +224,7 @@ def review_and_optimize(df):
         if f <= 5: cold_cnt += 1
         elif f >= 12: hot_cnt += 1
 
+    # 核心推荐比对
     actual_sum, actual_span = latest_row["和值"], latest_row["跨度"]
     detailed_analysis = []
     for p in picks:
@@ -222,6 +246,18 @@ def review_and_optimize(df):
         analysis_str += f"跨度 {p_span} (开奖 {actual_span})。"
         detailed_analysis.append(analysis_str)
 
+    # 灵感池比对
+    insp_hits = []
+    all_insp_picks = []
+    for r in insp_records:
+        all_insp_picks.extend(r["picks"].split(", "))
+    all_insp_picks = list(set(all_insp_picks)) # 去重
+    
+    for p in all_insp_picks:
+        if p == actual_code or "".join(sorted(p)) == "".join(sorted(actual_code)):
+            insp_hits.append(p)
+
+    # 策略进化
     new_weights = last_weights.copy()
     if cold_cnt >= 2:
         new_weights["cold"] = min(0.40, new_weights["cold"] + 0.02)
@@ -239,7 +275,8 @@ def review_and_optimize(df):
     return new_weights, {
         "qihao": latest_qihao, "actual_code": actual_code, "actual_sum": actual_sum, "actual_span": actual_span,
         "picks": picks, "cold_cnt": cold_cnt, "hot_cnt": hot_cnt, 
-        "detailed_analysis": detailed_analysis, "reflect_text": reflect_text
+        "detailed_analysis": detailed_analysis, "reflect_text": reflect_text,
+        "insp_hits": insp_hits, "total_insp_count": len(all_insp_picks)
     }
 
 # ========== 预测与评估功能 ==========
@@ -382,6 +419,13 @@ target_qihao = str(int(latest_qihao) + 1) if latest_qihao.isdigit() else latest_
 
 # --- 顶部：深度复盘 ---
 if review_data:
+    insp_html = ""
+    if review_data['insp_hits']:
+        hits_str = ", ".join(review_data['insp_hits'])
+        insp_html = f'<div class="insp-hit">🎯 灵感池捕获！在昨天刷新的 {review_data["total_insp_count"]} 注灵感号码中，成功命中：{hits_str}</div>'
+    elif review_data['total_insp_count'] > 0:
+        insp_html = f'<div style="margin-top:10px; color:#86868b; font-size:13px;">(昨日共生成 {review_data["total_insp_count"]} 注灵感号码，未命中)</div>'
+
     st.markdown(f"""
     <div class="review-card">
         <h4 style="margin-top:0; color:#ff9500;">📝 昨日深度复盘：第 {review_data['qihao']} 期</h4>
@@ -392,6 +436,7 @@ if review_data:
         <div style="background:#fff; padding:10px; border-radius:8px;">
             {"<br>".join(review_data['detailed_analysis'])}
         </div>
+        {insp_html}
         <div style="margin-top:10px; font-weight:bold; color:#28cd41;">
             🧠 策略进化：{review_data['reflect_text']}
         </div>
@@ -446,7 +491,9 @@ with col_left:
     st.markdown("### 💡 灵感号码池")
     if "extra_picks" not in st.session_state: st.session_state.extra_picks = ([], [])
     if st.button("🔄 刷新灵感池", use_container_width=True):
-        st.session_state.extra_picks = generate_picks_core(df, current_weights, num_picks=5, is_extra=True)
+        new_picks, new_reasons = generate_picks_core(df, current_weights, num_picks=5, is_extra=True)
+        st.session_state.extra_picks = (new_picks, new_reasons)
+        save_inspiration_picks(target_qihao, new_picks) # 刷新即入库记录！
     
     extra_picks, extra_reasons = st.session_state.extra_picks
     if extra_picks:
@@ -467,7 +514,7 @@ with col_left:
                 </div>
                 """, unsafe_allow_html=True)
     else:
-        st.info("点击上方按钮生成灵感号码。")
+        st.info("点击上方按钮生成灵感号码。每次点击都会生成 5 注并记录在云端，供明日复盘使用。")
 
 # ---------------- 右侧：冷热形态与重号 ----------------
 with col_right:
@@ -525,13 +572,12 @@ with col_right:
 
 st.divider()
 
-# ================= Row 3: 宽幅走势图与形态表 (融合预测与评估) =================
+# ================= Row 3: 宽幅走势图与形态表 =================
 st.markdown("### 📈 深度走势分析与模拟推演")
 
 col_chart, col_shape = st.columns([3, 1], gap="small")
 
 with col_chart:
-    # 选号框区域：分为三列与图表对齐，并在第四列显示结果
     sim_cols = st.columns([1, 1, 1, 1])
     sim_b = sim_cols[0].selectbox("百位", options=[str(i) for i in range(10)], index=3, key="sim_b")
     sim_s = sim_cols[1].selectbox("十位", options=[str(i) for i in range(10)], index=4, key="sim_s")
@@ -539,7 +585,6 @@ with col_chart:
     custom_code = f"{sim_b}{sim_s}{sim_g}"
     sim_cols[3].markdown(f"<div style='margin-top:30px; font-size:20px; font-weight:bold;'>预测选号: <span style='color:#ff3b30;'>{custom_code}</span></div>", unsafe_allow_html=True)
 
-    # 图表区域
     chart_data = df.head(30).copy().sort_values("期号", ascending=True)
     chart_data["期号简写"] = chart_data["期号"].astype(str).str[-3:]
     for c in ["百位", "十位", "个位"]: chart_data[c] = chart_data[c].astype(int)
@@ -595,7 +640,7 @@ with col_chart:
     st.altair_chart(final_chart, use_container_width=True)
 
 with col_shape:
-    st.markdown("<div style='margin-top:50px;'></div>", unsafe_allow_html=True) # 为了对齐高度
+    st.markdown("<div style='margin-top:50px;'></div>", unsafe_allow_html=True)
     st.markdown("**形态与参数**")
     shape_df = chart_data[["期号简写", "形态", "和值", "跨度"]].copy()
     shape_df.loc[shape_df["期号简写"] == next_qihao_str, "形态"] = "预测"
@@ -614,7 +659,6 @@ st.markdown("### 📋 预测号码综合评估报告")
 score, pros, cons, miss = evaluate_custom_number(df, custom_code)
 count, _, _ = check_history_appearance(df, custom_code, 1000)
 
-# 修复 HTML 渲染问题：先拼接好 HTML 字符串，且不要在开头留空格
 pros_text = "<br>".join(['· ' + p for p in pros]) if pros else "· 无"
 cons_text = "<br>".join(['· ' + c for c in cons]) if cons else "· 无"
 
