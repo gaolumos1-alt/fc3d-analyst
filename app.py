@@ -35,7 +35,7 @@ st.markdown("""
         backdrop-filter: blur(20px);
         border-right: 1px solid rgba(0,0,0,0.05);
     }
-    [data-testid="stRadio"] > div {
+    [data-testid="stRadio"] > div, [data-testid="stSelectbox"] > div {
         background-color: #ffffff !important;
         padding: 10px;
         border-radius: 12px;
@@ -90,12 +90,10 @@ def fetch_page(page, limit=100):
     return []
 
 def get_db_connection():
-    """每次调用都返回一个全新的数据库连接，用完即关，避免连接失效"""
     db_url = st.secrets["DATABASE_URL"]
     return psycopg2.connect(db_url, sslmode='require')
 
 def sync_database():
-    """从接口拉取最新数据，并写入 Neon 数据库"""
     conn = get_db_connection()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -136,7 +134,6 @@ def sync_database():
         conn.close()
 
 def load_data_from_db():
-    """从 Neon 数据库加载所有数据到 DataFrame"""
     conn = get_db_connection()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -171,10 +168,7 @@ def calculate_actual_repeat_stats(df, window):
     window_df = df.head(window)
     counts = window_df["完整号码"].value_counts()
     duplicated_codes = counts[counts >= 2]
-    num_dup_types = len(duplicated_codes)
-    num_dup_draws = duplicated_codes.sum()
-    prob = (num_dup_draws / window) * 100 if window > 0 else 0
-    return num_dup_types, num_dup_draws, prob, duplicated_codes
+    return len(duplicated_codes), duplicated_codes.sum(), (duplicated_codes.sum()/window)*100 if window>0 else 0, duplicated_codes
 
 def get_missing_values(df, col_name, lookback=100):
     recent_df = df.head(lookback)
@@ -185,7 +179,6 @@ def get_missing_values(df, col_name, lookback=100):
         missing[num_str] = lookback if matches.empty else matches.index[0]
     return dict(sorted(missing.items(), key=lambda item: item[1], reverse=True))
 
-# ========== 推荐生成逻辑 ==========
 def generate_reverse_picks(df, current_weights):
     exclude_set = set(df.head(EXCLUDE_RANGE)["完整号码"].tolist())
     recent_df = df.head(RECENT_ANALYZE)
@@ -327,6 +320,128 @@ else:
     ).properties(height=550, background='transparent').interactive()
 
 st.altair_chart(chart, use_container_width=True)
+
+
+# ================= 新增模块：定制号码评估 =================
+st.markdown("### 🔍 定制号码评估 (选号分析)")
+st.caption("请选择您想分析的百、十、个位数字，系统将提取历史数据进行专业评估。")
+
+col_b, col_s, col_g = st.columns(3)
+with col_b:
+    sel_b = st.selectbox("百位数字", options=[str(i) for i in range(10)], index=0)
+with col_s:
+    sel_s = st.selectbox("十位数字", options=[str(i) for i in range(10)], index=0)
+with col_g:
+    sel_g = st.selectbox("个位数字", options=[str(i) for i in range(10)], index=0)
+
+custom_code = f"{sel_b}{sel_s}{sel_g}"
+
+# 评估逻辑
+if st.button("生成评估报告", type="primary", use_container_width=True):
+    st.markdown(f"#### 📝 号码 **{custom_code}** 专项分析")
+    
+    # 1. 计算整体遗漏和历史出现次数
+    total_count, periods, dates = check_history_appearance(df, custom_code, 1000)
+    
+    # 找出最近一次出现的索引（即间隔期数）
+    matches_idx = df.index[df["完整号码"] == custom_code].tolist()
+    if matches_idx:
+        # 因为 df 是按期号降序排列，最小的索引就是最近一次出现的期数。
+        # 如果索引是 5，说明它距离最新一期之间隔了 5 期（在最新一期出现的话索引是0）
+        recent_gap = min(matches_idx)
+        last_period = df.loc[recent_gap, "期号"]
+        gap_text = f"**距离最近一次出现：** 第 {last_period} 期，距今间隔 **{recent_gap}** 期。"
+    else:
+        gap_text = "**距离最近一次出现：** 近1000期内从未开出。"
+    
+    st.info(f"📊 **整体历史表现**：该号码在近1000期内共出现 **{total_count}** 次。{gap_text}")
+
+    # 2. 位置遗漏分析
+    miss_b = df.index[df["百位"] == sel_b].min() if not df[df["百位"] == sel_b].empty else ">1000"
+    miss_s = df.index[df["十位"] == sel_s].min() if not df[df["十位"] == sel_s].empty else ">1000"
+    miss_g = df.index[df["个位"] == sel_g].min() if not df[df["个位"] == sel_g].empty else ">1000"
+    
+    # 3. 形态、优缺点及推荐指数评估算法
+    nums = [int(sel_b), int(sel_s), int(sel_g)]
+    total_sum = sum(nums)
+    span = max(nums) - min(nums)
+    odd_cnt = sum(1 for n in nums if n % 2 != 0)
+    
+    # 获取近期均值作为参考
+    recent_avg_sum = sum(int(r["百位"]) + int(r["十位"]) + int(r["个位"]) for _, r in df.head(100).iterrows()) / 100
+    
+    pros = []
+    cons = []
+    score = 3 # 基础分 3 星
+
+    # 位置遗漏评判
+    if isinstance(miss_b, int) and miss_b >= 15: pros.append(f"百位 {sel_b} 遗漏 {miss_b} 期，具备回补潜力")
+    if isinstance(miss_s, int) and miss_s >= 15: pros.append(f"十位 {sel_s} 遗漏 {miss_s} 期，具备回补潜力")
+    if isinstance(miss_g, int) and miss_g >= 15: pros.append(f"个位 {sel_g} 遗漏 {miss_g} 期，具备回补潜力")
+    
+    if isinstance(miss_b, int) and miss_b <= 3: cons.append(f"百位 {sel_b} 近期过热，谨防转冷")
+    if isinstance(miss_s, int) and miss_s <= 3: cons.append(f"十位 {sel_s} 近期过热，谨防转冷")
+    if isinstance(miss_g, int) and miss_g <= 3: cons.append(f"个位 {sel_g} 近期过热，谨防转冷")
+
+    # 形态评判
+    if abs(total_sum - recent_avg_sum) <= 3:
+        pros.append(f"和值 {total_sum} 贴近近期均值 {recent_avg_sum:.1f}，形态健康")
+        score += 1
+    elif abs(total_sum - recent_avg_sum) >= 8:
+        cons.append(f"和值 {total_sum} 偏离近期均值较大，偏态严重")
+        score -= 1
+
+    if 4 <= span <= 8:
+        pros.append(f"跨度 {span} 位于高概率黄金区间")
+        score += 1
+    elif span < 2 or span > 9:
+        cons.append(f"跨度 {span} 过于极端")
+        score -= 1
+
+    if odd_cnt in (0, 3):
+        cons.append("全奇/全偶，偏离常规比例")
+        score -= 1
+    else:
+        pros.append(f"奇偶比 {odd_cnt}:{3-odd_cnt}，比例均衡")
+
+    # 顺子/豹子过滤（如果是大概率下注，不建议买顺子）
+    sorted_nums = sorted(nums)
+    if sorted_nums[1] == sorted_nums[0] + 1 and sorted_nums[2] == sorted_nums[1] + 1:
+        cons.append("当前为顺子形态，开出概率相对较低")
+        score -= 1
+    if len(set(nums)) == 1:
+        cons.append("当前为豹子形态，开出概率极低")
+        score -= 2
+
+    # 限制分数在 1-5 之间
+    score = max(1, min(5, score))
+    stars = "⭐" * score
+
+    # 渲染评估结果卡片
+    st.markdown(f"""
+    <div class="apple-card">
+        <div style="font-size:18px; font-weight:bold; margin-bottom:15px;">
+            综合推荐指数：<span style="color:#ff9500;">{stars}</span> ({score}/5)
+        </div>
+        <div style="margin-bottom:10px;">
+            <b>📍 位置遗漏追踪：</b><br>
+            百位 <b>{sel_b}</b>：距今 {miss_b} 期<br>
+            十位 <b>{sel_s}</b>：距今 {miss_s} 期<br>
+            个位 <b>{sel_g}</b>：距今 {miss_g} 期
+        </div>
+        <hr style="border:0; border-top:1px solid #e5e5ea; margin:15px 0;">
+        <div style="margin-bottom:10px; color:#34c759;">
+            <b>✅ 优势分析：</b><br>
+            {"<br>".join(["· " + p for p in pros]) if pros else "· 无明显优势"}
+        </div>
+        <div style="color:#ff3b30;">
+            <b>⚠️ 劣势风险：</b><br>
+            {"<br>".join(["· " + c for c in cons]) if cons else "· 无明显劣势"}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("收起报告"):
+        pass
 
 
 # ================= 模块：精选推荐 (直接读写云端) =================
