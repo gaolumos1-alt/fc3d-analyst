@@ -15,7 +15,7 @@ LOTTERY_TYPE = "fcsd"
 EXCLUDE_RANGE = 100    
 RECENT_ANALYZE = 100   
 
-# 宽屏模式 (优化大屏排版)
+# 宽屏模式
 st.set_page_config(page_title="福彩3D 智能分析", page_icon="🎯", layout="wide")
 
 # ================= 苹果明亮风 + 优化大屏布局 CSS =================
@@ -39,19 +39,20 @@ st.markdown("""
     /* 卡片紧凑化 */
     .apple-card {
         background-color: #ffffff;
-        border-radius: 16px;
-        padding: 16px;
-        margin-bottom: 12px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+        border-radius: 12px;
+        padding: 10px 14px; /* 大幅缩小内边距 */
+        margin-bottom: 8px; /* 缩小间距 */
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
         border: 1px solid #e5e5ea;
     }
-    .apple-title { font-size: 14px; font-weight: 600; color: #86868b !important; margin-bottom: 4px; }
+    .apple-title { font-size: 12px; font-weight: 600; color: #86868b !important; margin-bottom: 2px; }
     .pick-number {
-        font-size: 36px; font-weight: 800; color: #007aff !important;
-        letter-spacing: 4px; margin-bottom: 8px; font-family: monospace;
+        font-size: 28px; /* 字号缩小 */
+        font-weight: 800; color: #007aff !important;
+        letter-spacing: 4px; margin-bottom: 4px; font-family: monospace; line-height: 1.2;
     }
-    .reason-text { font-size: 13px; color: #1d1d1f !important; line-height: 1.4; }
-    .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+    .reason-text { font-size: 12px; color: #1d1d1f !important; line-height: 1.3; }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
     .badge-success { background-color: #e8f8ee; color: #28cd41 !important; }
     .badge-warning { background-color: #fff4e6; color: #ff9500 !important; }
     
@@ -59,19 +60,23 @@ st.markdown("""
         background-color: #fff9f0;
         border-left: 6px solid #ff9500;
         border-radius: 12px;
-        padding: 16px;
-        margin-bottom: 20px;
+        padding: 12px;
+        margin-bottom: 15px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+        font-size: 14px;
     }
     /* 评估报告样式 */
     .eval-card {
         background-color: #ffffff;
         border-radius: 16px;
-        padding: 24px;
+        padding: 20px;
         box-shadow: 0 8px 24px rgba(0,0,0,0.05);
         border: 1px solid #e5e5ea;
     }
     .star-text { color: #ff9500 !important; font-size: 24px; }
+    
+    /* 调整图表所在容器高度对齐 */
+    [data-testid="column"] { padding: 0 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -211,11 +216,9 @@ def review_and_optimize(df):
 
 # ========== 趋势与评估功能 ==========
 def analyze_cold_hot_trend(df):
-    """新增：分析近10/20/50期冷热形态"""
     results = []
     for window in [10, 20, 50]:
-        recent_df = df.iloc[1:window+1] # 剔除最新一期（因为最新一期是复盘用的）
-        # 基于前100期计算冷热池
+        recent_df = df.iloc[1:window+1]
         base_df = df.iloc[window+1:window+101]
         freq_counter = Counter()
         for _, r in base_df.iterrows():
@@ -235,12 +238,10 @@ def analyze_cold_hot_trend(df):
     return pd.DataFrame(results)
 
 def evaluate_custom_number(df, code):
-    """增强版：定制号码综合评估"""
     nums = [int(c) for c in code]
     total_sum, span = sum(nums), max(nums) - min(nums)
     odd_cnt = sum(1 for n in nums if n % 2 != 0)
     
-    # 获取位置遗漏
     miss = []
     for i, col in enumerate(["百位", "十位", "个位"]):
         m = df.index[df[col] == str(nums[i])].min() if not df[df[col] == str(nums[i])].empty else 1000
@@ -251,28 +252,28 @@ def evaluate_custom_number(df, code):
     pros, cons, score = [], [], 3
     
     if any(m >= 15 for m in miss): 
-        pros.append(f"包含长遗漏位置（百/十/个位遗漏 {miss[0]}/{miss[1]}/{miss[2]} 期），具备回补潜力")
+        pros.append(f"长遗漏(百/十/个: {miss[0]}/{miss[1]}/{miss[2]})")
         score += 1
     if any(m <= 3 for m in miss):
-        cons.append("部分位置近期过热，谨防转冷")
+        cons.append("近期过热防转冷")
         score -= 1
         
     if abs(total_sum - recent_avg_sum) <= 3:
-        pros.append(f"和值 {total_sum} 贴近近期均值 {recent_avg_sum:.1f}")
+        pros.append(f"和值{total_sum}贴近均值")
         score += 1
     elif abs(total_sum - recent_avg_sum) >= 8:
-        cons.append(f"和值 {total_sum} 偏离近期均值较大")
+        cons.append(f"和值{total_sum}偏离均值")
         score -= 1
         
-    if 4 <= span <= 8: pros.append(f"跨度 {span} 在黄金区间")
-    elif span < 2 or span > 9: cons.append(f"跨度 {span} 过于极端"); score -= 1
+    if 4 <= span <= 8: pros.append(f"跨度{span}在黄金区")
+    elif span < 2 or span > 9: cons.append(f"跨度{span}极端"); score -= 1
     
-    if odd_cnt in (0, 3): cons.append("全奇/全偶偏离常规"); score -= 1
-    else: pros.append(f"奇偶比 {odd_cnt}:{3-odd_cnt} 均衡")
+    if odd_cnt in (0, 3): cons.append("全奇/全偶"); score -= 1
+    else: pros.append(f"奇偶比{odd_cnt}:{3-odd_cnt}")
     
     sorted_nums = sorted(nums)
     if sorted_nums[1] == sorted_nums[0] + 1 and sorted_nums[2] == sorted_nums[1] + 1:
-        cons.append("顺子形态开出概率低"); score -= 1
+        cons.append("顺子形态概率低"); score -= 1
         
     score = max(1, min(5, score))
     return score, pros, cons, miss
@@ -370,9 +371,9 @@ else:
     st.info(f"当前基准: 第 {latest_qihao} 期。正在使用基础策略权重。")
 
 # ================= 核心布局：分栏仪表盘 =================
-# Row 1: 推荐号 (左) vs 灵感池 (右)
 col_left, col_right = st.columns([1, 1], gap="large")
 
+# ---------------- 左侧：推荐号与灵感池 ----------------
 with col_left:
     st.markdown("### 🎯 今日精选推荐 (5注)")
     conn = get_db_connection()
@@ -395,69 +396,74 @@ with col_left:
             conn.commit()
         finally: conn.close()
 
+    # 将精选推荐以双列排版，更加紧凑
+    c_pick1, c_pick2 = st.columns(2)
     for i, code in enumerate(picks):
         count, _, _ = check_history_appearance(df, code, 1000)
         gap = get_recent_gap(df, code)
-        status = f"<span class='badge badge-warning'>出过 {count} 次 ({f'间隔{gap}期' if gap!=-1 else '未开'})</span>" if count>0 else "<span class='badge badge-success'>✨近千期未开</span>"
-        st.markdown(f"""
-        <div class="apple-card">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div class="pick-number">{code}</div> <div>{status}</div>
-            </div>
-            <div class="reason-text">💡 <b>逻辑:</b> {reasons[i]}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-with col_right:
-    st.markdown("### 💡 灵感号码池 (额外推荐)")
-    if "extra_picks" not in st.session_state: st.session_state.extra_picks = ([], [])
-    if st.button("🔄 刷新灵感号码池", use_container_width=True):
-        st.session_state.extra_picks = generate_picks_core(df, current_weights, num_picks=5, is_extra=True)
-    
-    extra_picks, extra_reasons = st.session_state.extra_picks
-    if not extra_picks:
-        st.info("点击上方按钮生成一组额外的灵感号码。")
-    else:
-        for i, (code, reason) in enumerate(zip(extra_picks, extra_reasons)):
-            gap = get_recent_gap(df, code)
-            gap_text = f"间隔{gap}期" if gap != -1 else "近千期未开"
+        status = f"<span class='badge badge-warning'>出{count}次(隔{gap}期)</span>" if count>0 else "<span class='badge badge-success'>近千期未开</span>"
+        
+        target_col = c_pick1 if i % 2 == 0 else c_pick2
+        with target_col:
             st.markdown(f"""
-            <div class="apple-card" style="padding: 12px;">
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div style="font-size:26px; font-weight:bold; color:#007aff;">{code}</div>
-                    <div style="font-size:12px; color:#86868b;">{gap_text}</div>
+            <div class="apple-card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <div class="pick-number">{code}</div> <div>{status}</div>
                 </div>
-                <div style="font-size:12px; color:#666; margin-top:4px;">{reason}</div>
+                <div class="reason-text">💡 {reasons[i]}</div>
             </div>
             """, unsafe_allow_html=True)
 
-# Row 2: 冷热趋势 (左) vs 重号统计 (右)
-col_trend, col_repeat = st.columns([1, 1], gap="large")
+    st.markdown("### 💡 灵感号码池")
+    if "extra_picks" not in st.session_state: st.session_state.extra_picks = ([], [])
+    if st.button("🔄 刷新灵感池", use_container_width=True):
+        st.session_state.extra_picks = generate_picks_core(df, current_weights, num_picks=5, is_extra=True)
+    
+    extra_picks, extra_reasons = st.session_state.extra_picks
+    if extra_picks:
+        c_ex1, c_ex2 = st.columns(2)
+        for i, (code, reason) in enumerate(zip(extra_picks, extra_reasons)):
+            gap = get_recent_gap(df, code)
+            gap_text = f"间隔{gap}期" if gap != -1 else "近千期未开"
+            
+            target_col = c_ex1 if i % 2 == 0 else c_ex2
+            with target_col:
+                st.markdown(f"""
+                <div class="apple-card" style="padding: 8px 12px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div style="font-size:22px; font-weight:bold; color:#007aff;">{code}</div>
+                        <div style="font-size:11px; color:#86868b;">{gap_text}</div>
+                    </div>
+                    <div style="font-size:11px; color:#666;">{reason}</div>
+                </div>
+                """, unsafe_allow_html=True)
+    else:
+        st.info("点击上方按钮生成灵感号码。")
 
-with col_trend:
+# ---------------- 右侧：冷热趋势与重号统计 ----------------
+with col_right:
     st.markdown("### 🌡️ 近期冷热形态追踪")
     trend_df = analyze_cold_hot_trend(df)
-    
-    # 绘制堆叠柱状图
     chart_df = trend_df.melt(id_vars=["周期"], value_vars=["冷号", "温号", "热号"], var_name="类型", value_name="比例")
-    chart = alt.Chart(chart_df).mark_bar().encode(
+    chart_trend = alt.Chart(chart_df).mark_bar().encode(
         x=alt.X('周期:N', sort=None),
         y=alt.Y('比例:Q', stack='normalize', axis=alt.Axis(format='%')),
         color=alt.Color('类型:N', scale=alt.Scale(domain=['冷号', '温号', '热号'], range=['#00BCD4', '#8BC34A', '#FF5722'])),
         tooltip=['周期', '类型', alt.Tooltip('比例:Q', format='.1%')]
-    ).properties(height=250, background='transparent')
-    st.altair_chart(chart, use_container_width=True)
+    ).properties(height=200, background='transparent')
+    st.altair_chart(chart_trend, use_container_width=True)
     
-    # 辅助文字结论
     c10 = trend_df[trend_df["周期"]=="近10期"].iloc[0]
-    if c10["热号"] > 0.4: st.write("🔥 **近10期热号偏多**，注意防范强者恒强。")
-    elif c10["冷号"] > 0.4: st.write("❄️ **近10期冷号偏多**，处于冷号回补期。")
-    else: st.write("⚖️ 近期冷热较均衡，温号主导。")
+    if c10["热号"] > 0.4: st.caption("🔥 **近10期热号偏多**，注意防范强者恒强。")
+    elif c10["冷号"] > 0.4: st.caption("❄️ **近10期冷号偏多**，处于冷号回补期。")
+    else: st.caption("⚖️ 近期冷热较均衡，温号主导。")
 
-with col_repeat:
     st.markdown("### 📊 重号概率统计")
-    c1, c2, c3 = st.columns(3)
-    for col, window in zip([c1, c2, c3], [100, 200, 500]):
+    show_repeat_details = st.toggle("显示重复号码明细", value=False, key="toggle_repeat")
+    
+    c1, c2, c3, c4 = st.columns(4)
+    windows = [100, 200, 500, 1000]
+    for col, window in zip([c1, c2, c3, c4], windows):
         window_df = df.head(window)
         counts = window_df["完整号码"].value_counts()
         dup = counts[counts >= 2]
@@ -465,33 +471,50 @@ with col_repeat:
         with col:
             st.metric(label=f"近 {window} 期", value=f"{prob:.1f}%")
             st.caption(f"重号 {len(dup)} 个")
+            
+    if show_repeat_details:
+        cols_d = st.columns(4)
+        for col, window in zip(cols_d, windows):
+            window_df = df.head(window)
+            counts = window_df["完整号码"].value_counts()
+            dup = counts[counts >= 2]
+            with col:
+                if not dup.empty:
+                    dup_df = pd.DataFrame({"号码": dup.index, "次数": dup.values})
+                    st.dataframe(dup_df, hide_index=True, use_container_width=True)
+                else:
+                    st.caption("无重复")
 
-# Row 3: 走势图与定制评估 (使用 Tabs 节省空间)
-st.markdown("### 📈 深度分析与工具")
-tab1, tab2 = st.tabs(["定位走势图", "定制号码评估"])
+st.divider()
 
-with tab1:
-    view_mode = st.radio("选择位置：", ["综合走势", "百位", "十位", "个位"], horizontal=True)
+# ================= Row 3: 走势图与定制评估 (左右并排) =================
+st.markdown("### 📈 深度分析与定制评估")
+col_chart, col_eval = st.columns([2, 1], gap="large")
+
+with col_chart:
+    st.markdown("**走势图 (综合走势)**")
     chart_data = df.head(30).copy().sort_values("期号", ascending=True)
     chart_data["期号简写"] = chart_data["期号"].astype(str).str[-3:]
     for c in ["百位", "十位", "个位"]: chart_data[c] = chart_data[c].astype(int)
 
-    y_axis = alt.Y('期号简写:N', title='期号', sort=chart_data['期号简写'].tolist(), axis=alt.Axis(labelAngle=0))
-    if view_mode == "综合走势":
-        melted_df = chart_data.melt(id_vars=['期号简写'], value_vars=['百位', '十位', '个位'], var_name='位置', value_name='数值')
-        x_axis = alt.X('数值:Q', scale=alt.Scale(domain=[-0.5, 9.5]), axis=alt.Axis(values=list(range(10))))
-        chart = alt.Chart(melted_df).mark_line(point=alt.OverlayMarkDef(size=50, filled=True, stroke='white', strokeWidth=2), strokeWidth=3).encode(
-            x=x_axis, y=y_axis, color=alt.Color('位置:N', scale=alt.Scale(domain=['百位', '十位', '个位'], range=['#FF5722', '#00BCD4', '#8BC34A']))
-        ).properties(height=500, background='transparent').interactive()
-    else:
-        color = '#FF5722' if view_mode == "百位" else '#00BCD4' if view_mode == "十位" else '#8BC34A'
-        x_axis = alt.X(f'{view_mode}:Q', scale=alt.Scale(domain=[-0.5, 9.5]), axis=alt.Axis(values=list(range(10))))
-        chart = alt.Chart(chart_data).mark_line(point=alt.OverlayMarkDef(size=60, filled=True, color=color, stroke='white', strokeWidth=2), strokeWidth=4, color=color).encode(
-            x=x_axis, y=y_axis
-        ).properties(height=500, background='transparent').interactive()
+    # 强制显示所有 Y 轴刻度（取消隐藏重叠）
+    y_axis = alt.Y('期号简写:N', 
+                   sort=chart_data['期号简写'].tolist(), 
+                   axis=alt.Axis(labelAngle=0, labelOverlap=False, tickCount=chart_data.shape[0]))
+    
+    melted_df = chart_data.melt(id_vars=['期号简写'], value_vars=['百位', '十位', '个位'], var_name='位置', value_name='数值')
+    x_axis = alt.X('数值:Q', scale=alt.Scale(domain=[-0.5, 9.5]), axis=alt.Axis(values=list(range(10))))
+    
+    chart = alt.Chart(melted_df).mark_line(point=alt.OverlayMarkDef(size=40, filled=True, stroke='white', strokeWidth=2), strokeWidth=2).encode(
+        x=x_axis, y=y_axis, 
+        color=alt.Color('位置:N', scale=alt.Scale(domain=['百位', '十位', '个位'], range=['#FF5722', '#00BCD4', '#8BC34A'])),
+        tooltip=['期号简写', '位置', '数值']
+    ).properties(height=600, background='transparent').interactive()
+    
     st.altair_chart(chart, use_container_width=True)
 
-with tab2:
+with col_eval:
+    st.markdown("**定制号码评估**")
     col_b, col_s, col_g = st.columns(3)
     sel_b = col_b.selectbox("百位", options=[str(i) for i in range(10)], key="sb_b")
     sel_s = col_s.selectbox("十位", options=[str(i) for i in range(10)], key="sb_s")
@@ -504,22 +527,23 @@ with tab2:
         
         st.markdown(f"""
         <div class="eval-card">
-            <h3 style="margin-top:0;">号码 <span style="color:#007aff;">{custom_code}</span> 评估</h3>
-            <div style="margin-bottom:15px;">
-                <span style="font-size:16px; font-weight:bold;">推荐星级：</span> <span class="star-text">{'★'*score}{'☆'*(5-score)}</span>
-                <span style="color:#86868b; font-size:14px; margin-left:10px;">(历史开出 {count} 次)</span>
+            <h4 style="margin-top:0;">号码 <span style="color:#007aff;">{custom_code}</span></h4>
+            <div style="margin-bottom:10px;">
+                <span style="font-weight:bold; font-size:14px;">推荐星级：</span> <span class="star-text">{'★'*score}{'☆'*(5-score)}</span>
+                <div style="color:#86868b; font-size:12px; margin-top:4px;">近千期开出 {count} 次</div>
             </div>
-            <div style="display:flex; gap:20px;">
-                <div style="flex:1; background:#f5f5f7; padding:15px; border-radius:12px;">
-                    <b>📍 位置遗漏</b><br>
-                    百位: {miss[0]} 期<br>十位: {miss[1]} 期<br>个位: {miss[2]} 期
-                </div>
-                <div style="flex:1; background:#e8f8ee; padding:15px; border-radius:12px; color:#28cd41;">
-                    <b>✅ 优势</b><br>{"<br>".join(['· ' + p for p in pros]) if pros else '· 无明显优势'}
-                </div>
-                <div style="flex:1; background:#fff4e6; padding:15px; border-radius:12px; color:#ff9500;">
-                    <b>⚠️ 风险</b><br>{"<br>".join(['· ' + c for c in cons]) if cons else '· 无明显风险'}
-                </div>
+            
+            <div style="background:#f5f5f7; padding:10px; border-radius:8px; margin-bottom:10px; font-size:13px;">
+                <b>📍 位置遗漏</b><br>
+                百: {miss[0]} 期 | 十: {miss[1]} 期 | 个: {miss[2]} 期
+            </div>
+            
+            <div style="background:#e8f8ee; padding:10px; border-radius:8px; color:#28cd41; font-size:13px; margin-bottom:10px;">
+                <b>✅ 优势</b><br>{"<br>".join(['· ' + p for p in pros]) if pros else '· 无'}
+            </div>
+            
+            <div style="background:#fff4e6; padding:10px; border-radius:8px; color:#ff9500; font-size:13px;">
+                <b>⚠️ 风险</b><br>{"<br>".join(['· ' + c for c in cons]) if cons else '· 无'}
             </div>
         </div>
         """, unsafe_allow_html=True)
