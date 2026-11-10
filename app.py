@@ -49,7 +49,7 @@ st.markdown("""
         letter-spacing: 4px; margin-bottom: 4px; font-family: monospace; line-height: 1.2;
     }
     .reason-text { font-size: 12px; color: #1d1d1f !important; line-height: 1.3; }
-    .badge { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+    .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
     .badge-success { background-color: #e8f8ee; color: #28cd41 !important; }
     .badge-warning { background-color: #fff4e6; color: #ff9500 !important; }
     
@@ -335,6 +335,9 @@ def get_recent_gap(df, code):
     return min(matches_idx) if matches_idx else -1
 
 def check_history_appearance(df, code, lookback=1000):
+    # 修复空数据导致的 KeyError
+    if df.empty or "完整号码" not in df.columns:
+        return 0, [], []
     recent_df = df.head(lookback)
     matches = recent_df[recent_df["完整号码"] == code]
     periods = matches["期号"].tolist()
@@ -387,23 +390,26 @@ def generate_picks_core(df, current_weights, num_picks=5, is_extra=False):
 st.title("🎯 福彩3D 智能分析终端")
 st.caption("宽屏仪表盘 | 动态策略 | 深度复盘")
 
-with st.sidebar:
-    st.header("🔍 号码查重")
-    search_code = st.text_input("输入3位数字", max_chars=3)
-    if search_code and len(search_code) == 3 and search_code.isdigit():
-        count, periods, dates = check_history_appearance(df if 'df' in locals() else pd.DataFrame(), search_code, 1000)
-        if count > 0: st.sidebar.warning(f"⚠️ {search_code} 出现 {count} 次:\n" + "\n".join([f"{p} ({d})" for p, d in zip(periods, dates)]))
-        else: st.sidebar.success(f"✨ {search_code} 近1000期未开出")
-    st.markdown("---")
-    if st.button("🔄 手动触发数据同步", use_container_width=True):
-        sync_database()
-        st.success("同步成功！")
-
 with st.spinner("同步数据中..."):
     sync_database()
     df = load_data_from_db()
 
 if df.empty: st.stop()
+
+# --- 侧边栏（移动到数据加载之后，避免空数据报错） ---
+with st.sidebar:
+    st.header("🔍 号码查重")
+    search_code = st.text_input("输入3位数字", max_chars=3)
+    if search_code and len(search_code) == 3 and search_code.isdigit():
+        count, periods, dates = check_history_appearance(df, search_code, 1000)
+        if count > 0: 
+            st.sidebar.warning(f"⚠️ {search_code} 出现 {count} 次:\n" + "\n".join([f"{p} ({d})" for p, d in zip(periods, dates)]))
+        else: 
+            st.sidebar.success(f"✨ {search_code} 近1000期未开出")
+    st.markdown("---")
+    if st.button("🔄 手动触发数据同步", use_container_width=True):
+        sync_database()
+        st.success("同步成功！")
 
 current_weights, review_data = review_and_optimize(df)
 latest_row = df.iloc[0]
@@ -412,7 +418,6 @@ target_qihao = str(int(latest_qihao) + 1) if latest_qihao.isdigit() else latest_
 
 # --- 顶部：深度复盘 ---
 if review_data:
-    # 修复核心：先拼接字符串，且不要在 f-string 内部产生多余的缩进换行
     analysis_html = "<br>".join(review_data['detailed_analysis'])
     insp_html = ""
     if review_data['insp_hits']:
@@ -461,7 +466,12 @@ with col_left:
     for i, code in enumerate(picks):
         count, _, _ = check_history_appearance(df, code, 1000)
         gap = get_recent_gap(df, code)
-        status = f"<span class='badge badge-warning'>出{count}次(隔{gap}期)</span>" if count>0 else "<span class='badge badge-success'>近千期未开</span>"
+        
+        # 优化显示文案
+        if count > 0:
+            status = f"<span class='badge badge-warning'>近千期出现 {count} 次 (距今 {gap} 期)</span>"
+        else:
+            status = "<span class='badge badge-success'>✨ 近千期未开出</span>"
         
         target_col = c_pick1 if i % 2 == 0 else c_pick2
         with target_col:
@@ -484,7 +494,7 @@ with col_left:
         c_ex1, c_ex2 = st.columns(2)
         for i, (code, reason) in enumerate(zip(extra_picks, extra_reasons)):
             gap = get_recent_gap(df, code)
-            gap_text = f"间隔{gap}期" if gap != -1 else "近千期未开"
+            gap_text = f"距今 {gap} 期" if gap != -1 else "近千期未开"
             
             target_col = c_ex1 if i % 2 == 0 else c_ex2
             with target_col:
