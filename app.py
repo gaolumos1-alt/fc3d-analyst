@@ -372,7 +372,6 @@ def generate_picks_core(df, current_weights, exclude_range, analyze_range, num_p
 st.title("🎯 福彩3D 终极量化终端")
 st.caption("遗漏回归 | 试机号联动 | 全维度统计 | 动态调参")
 
-# 1. 优先加载数据，保证后续查重和侧边栏拿到的都是最新完整数据
 with st.spinner("同步数据中..."):
     sync_database()
     df = load_data_from_db()
@@ -381,7 +380,6 @@ if df.empty:
     st.error("云端数据为空，请点击左侧手动同步或稍后刷新。")
     st.stop()
 
-# 2. 渲染侧边栏（由于 df 已经加载，查重功能将恢复正常）
 with st.sidebar:
     st.header("⚙️ 策略参数调节")
     exclude_range = st.slider("排重期数 (避开近期开出)", 50, 500, 100, step=10)
@@ -410,7 +408,6 @@ with st.sidebar:
         sync_database()
         st.success("同步成功！")
 
-# 3. 后续业务逻辑
 current_weights, review_data = review_and_optimize(df)
 latest_row = df.iloc[0]
 latest_qihao = latest_row["期号"]
@@ -547,22 +544,28 @@ st.divider()
 
 # ================= Row 3: 走势与模拟评估 =================
 st.markdown("### 📈 深度走势分析与模拟推演")
-col_chart, col_shape = st.columns([3, 1], gap="small")
+col_chart, col_shape = st.columns([2.2, 1], gap="small")
 
 with col_chart:
-    sim_cols = st.columns([1, 1, 1, 1])
-    sim_b = sim_cols[0].selectbox("百位", options=[str(i) for i in range(10)], index=3, key="sim_b")
-    sim_s = sim_cols[1].selectbox("十位", options=[str(i) for i in range(10)], index=4, key="sim_s")
-    sim_g = sim_cols[2].selectbox("个位", options=[str(i) for i in range(10)], index=6, key="sim_g")
+    # 优化选号区排版
+    sim_cols = st.columns([1, 1, 1, 1.2])
+    sim_b = sim_cols[0].selectbox("百位选号", options=[str(i) for i in range(10)], index=3, key="sim_b")
+    sim_s = sim_cols[1].selectbox("十位选号", options=[str(i) for i in range(10)], index=4, key="sim_s")
+    sim_g = sim_cols[2].selectbox("个位选号", options=[str(i) for i in range(10)], index=6, key="sim_g")
     custom_code = f"{sim_b}{sim_s}{sim_g}"
-    sim_cols[3].markdown(f"<div style='margin-top:30px; font-size:20px; font-weight:bold;'>预测选号: <span style='color:#ff3b30;'>{custom_code}</span></div>", unsafe_allow_html=True)
+    
+    pred_nums = [int(sim_b), int(sim_s), int(sim_g)]
+    pred_012 = f"{sum(1 for n in pred_nums if n%3==0)}{sum(1 for n in pred_nums if n%3==1)}{sum(1 for n in pred_nums if n%3==2)}"
+    pred_sum = sum(pred_nums)
+    
+    sim_cols[3].markdown(f"<div style='margin-top:28px; text-align:center; font-size:22px; font-weight:bold; color:#ff3b30;'>预测: {custom_code}</div>", unsafe_allow_html=True)
 
     chart_data = df.head(30).copy().sort_values("期号", ascending=True)
     chart_data["期号简写"] = chart_data["期号"].astype(str).str[-3:]
     for c in ["百位", "十位", "个位"]: chart_data[c] = chart_data[c].astype(int)
 
     next_qihao_str = "下期预测"
-    pred_row = pd.DataFrame([{"期号简写": next_qihao_str, "百位": int(sim_b), "十位": int(sim_s), "个位": int(sim_g), "形态": "-", "和值": int(sim_b)+int(sim_s)+int(sim_g), "跨度": max(int(sim_b), int(sim_s), int(sim_g)) - min(int(sim_b), int(sim_s), int(sim_g))}])
+    pred_row = pd.DataFrame([{"期号简写": next_qihao_str, "百位": int(sim_b), "十位": int(sim_s), "个位": int(sim_g), "形态": "预测", "012路": pred_012, "和值": pred_sum, "跨度": max(pred_nums) - min(pred_nums)}])
     chart_data = pd.concat([chart_data, pred_row], ignore_index=True)
     melted_df = chart_data.melt(id_vars=['期号简写'], value_vars=['百位', '十位', '个位'], var_name='位置', value_name='数值')
     melted_df['x_pos'] = melted_df.apply(lambda r: r['数值'] if r['位置']=='百位' else (r['数值']+12 if r['位置']=='十位' else r['数值']+24), axis=1)
@@ -581,17 +584,16 @@ with col_chart:
     texts = pd.DataFrame({'x': [4.5, 16.5, 28.5], 'text': ['百位', '十位', '个位']})
     text_chart = alt.Chart(texts).mark_text(dy=-10, fontWeight='bold', color='#86868b').encode(x='x:Q', text='text:N')
     
-    final_chart = (vline_chart + line_chart + dashed_lines + pred_points + text_chart).properties(height=600, background='transparent').interactive()
+    final_chart = (vline_chart + line_chart + dashed_lines + pred_points + text_chart).properties(height=550, background='transparent').interactive()
     st.altair_chart(final_chart, use_container_width=True)
 
 with col_shape:
-    st.markdown("<div style='margin-top:50px;'></div>", unsafe_allow_html=True)
+    st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True) # 去除多余留白，微调对齐
     st.markdown("**形态与 012路**")
     shape_df = chart_data[["期号简写", "形态", "012路", "和值"]].copy()
-    shape_df.loc[shape_df["期号简写"] == next_qihao_str, "形态"] = "预测"
     shape_df = shape_df.sort_values("期号简写", ascending=False).reset_index(drop=True)
     shape_df.columns = ["期号", "形态", "012路", "和值"]
-    st.dataframe(shape_df, hide_index=True, use_container_width=True, height=600)
+    st.dataframe(shape_df, hide_index=True, use_container_width=True, height=550)
 
 # --- 实时生成评估报告 ---
 st.markdown("### 📋 预测号码综合评估报告")
