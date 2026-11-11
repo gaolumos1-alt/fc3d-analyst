@@ -268,12 +268,9 @@ def analyze_trial_number(test_code, current_picks):
     nums = [int(c) for c in test_code]
     total_sum = sum(nums)
     span = max(nums) - min(nums)
+    sha_tail = total_sum % 10
+    sha_span = span
     
-    # 常见杀号公式推演
-    sha_tail = total_sum % 10  # 和值尾杀
-    sha_span = span # 跨度杀
-    
-    # 与今日推荐的联动
     combined_picks = "".join(current_picks)
     has_test_num = any(str(n) in combined_picks for n in nums)
     
@@ -284,7 +281,6 @@ def analyze_trial_number(test_code, current_picks):
         advice.append("今日推荐号完美避开了试机号的数字，可能开出试机号邻码，防范1个重号。")
         
     advice.append(f"【杀号参考】根据试机号推演，本期可杀和值尾数 <b>{sha_tail}</b> 及跨度 <b>{sha_span}</b> 附近的极端组合。")
-    
     return total_sum, span, advice
 
 # ========== 评估与回测功能 ==========
@@ -376,7 +372,16 @@ def generate_picks_core(df, current_weights, exclude_range, analyze_range, num_p
 st.title("🎯 福彩3D 终极量化终端")
 st.caption("遗漏回归 | 试机号联动 | 全维度统计 | 动态调参")
 
-# --- 侧边栏 ---
+# 1. 优先加载数据，保证后续查重和侧边栏拿到的都是最新完整数据
+with st.spinner("同步数据中..."):
+    sync_database()
+    df = load_data_from_db()
+
+if df.empty: 
+    st.error("云端数据为空，请点击左侧手动同步或稍后刷新。")
+    st.stop()
+
+# 2. 渲染侧边栏（由于 df 已经加载，查重功能将恢复正常）
 with st.sidebar:
     st.header("⚙️ 策略参数调节")
     exclude_range = st.slider("排重期数 (避开近期开出)", 50, 500, 100, step=10)
@@ -393,9 +398,11 @@ with st.sidebar:
     st.header("🔍 号码查重")
     search_code = st.text_input("输入3位数字", max_chars=3)
     if search_code and len(search_code) == 3 and search_code.isdigit():
-        count, periods, dates = check_history_appearance(df if 'df' in locals() else pd.DataFrame(), search_code, 1000)
-        if count > 0: st.sidebar.warning(f"⚠️ {search_code} 出现 {count} 次:\n" + "\n".join([f"{p} ({d})" for p, d in zip(periods, dates)]))
-        else: st.sidebar.success(f"✨ {search_code} 近1000期未开出")
+        count, periods, dates = check_history_appearance(df, search_code, 1000)
+        if count > 0: 
+            st.warning(f"⚠️ {search_code} 近千期出现 {count} 次:\n" + "\n".join([f"{p} ({d})" for p, d in zip(periods, dates)]))
+        else: 
+            st.success(f"✨ {search_code} 近1000期未开出")
         
     st.markdown("---")
     if st.button("🔄 手动触发数据同步", use_container_width=True):
@@ -403,12 +410,7 @@ with st.sidebar:
         sync_database()
         st.success("同步成功！")
 
-with st.spinner("同步数据中..."):
-    sync_database()
-    df = load_data_from_db()
-
-if df.empty: st.stop()
-
+# 3. 后续业务逻辑
 current_weights, review_data = review_and_optimize(df)
 latest_row = df.iloc[0]
 latest_qihao = latest_row["期号"]
