@@ -11,72 +11,44 @@ import psycopg2.extras
 
 # ================= 配置区 =================
 API_URL = "http://api.huiniao.top/interface/home/lotteryHistory"
-LOTTERY_TYPE = "pls"  # 排列三的彩种代码
+LOTTERY_TYPE = "fcsd"  # 福彩3D的彩种代码
 
-st.set_page_config(page_title="排列三 终极量化终端", page_icon="🏆", layout="wide")
+st.set_page_config(page_title="福彩3D 终极量化终端", page_icon="🎯", layout="wide")
 
-# ================= 体彩竞速风 CSS (加固防黑版) =================
+# ================= 苹果明亮风 + 响应式 CSS =================
 st.markdown("""
 <style>
-    /* 强制全局背景 */
     .stApp {
-        background-color: #f4f6f9 !important;
+        background-color: #fbfbfd;
         background-image: 
-            radial-gradient(circle at 10% 10%, rgba(255, 87, 34, 0.1) 0%, transparent 40%),
-            radial-gradient(circle at 90% 90%, rgba(26, 35, 126, 0.1) 0%, transparent 40%);
+            radial-gradient(circle at 10% 10%, rgba(255, 182, 193, 0.25) 0%, transparent 40%),
+            radial-gradient(circle at 90% 20%, rgba(176, 224, 230, 0.3) 0%, transparent 50%),
+            radial-gradient(circle at 80% 90%, rgba(221, 160, 221, 0.2) 0%, transparent 40%),
+            radial-gradient(circle at 20% 80%, rgba(255, 228, 196, 0.3) 0%, transparent 50%);
         background-attachment: fixed;
     }
     body, p, h1, h2, h3, h4, h5, h6, div, span { color: #1d1d1f !important; }
-    
-    /* 侧边栏 */
-    [data-testid="stSidebar"] { 
-        background-color: #ffffff !important; 
-        border-right: 1px solid #e5e5ea; 
-    }
-    
-    /* 输入框、下拉框、数字输入框防黑加固 */
-    div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, .stTextInput input {
-        background-color: #ffffff !important;
-        color: #1d1d1f !important;
-        border-radius: 10px;
-        border: 1px solid #e5e5ea;
-    }
-    /* 下拉菜单弹出层防黑加固 */
-    ul[data-testid="stSelectboxVirtualDropdown"] {
-        background-color: #ffffff !important;
-    }
-    
-    /* 滑块防黑加固 */
-    [data-testid="stSlider"] div { color: #1d1d1f !important; }
-
-    /* 表格防黑加固 */
-    [data-testid="stDataFrame"] { background-color: #ffffff !important; }
-    
-    /* 提示框防黑加固 */
-    .stAlert { background-color: #ffffff !important; border: 1px solid #e5e5ea; }
-    
-    /* 卡片样式 */
-    .apple-card { background-color: #ffffff; border-radius: 12px; padding: 12px 16px; margin-bottom: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.04); border-left: 4px solid #FF5722; }
-    .pick-number { font-size: 32px; font-weight: 800; color: #FF5722 !important; letter-spacing: 4px; margin-bottom: 4px; font-family: monospace; line-height: 1.2; }
-    .reason-text { font-size: 13px; color: #666 !important; line-height: 1.4; }
-    
+    [data-testid="stSidebar"] { background-color: rgba(255, 255, 255, 0.7) !important; backdrop-filter: blur(20px); border-right: 1px solid rgba(0,0,0,0.05); }
+    .apple-card { background-color: #ffffff; border-radius: 12px; padding: 10px 14px; margin-bottom: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); border: 1px solid #e5e5ea; }
+    .apple-title { font-size: 12px; font-weight: 600; color: #86868b !important; margin-bottom: 2px; }
+    .pick-number { font-size: 28px; font-weight: 800; color: #007aff !important; letter-spacing: 4px; margin-bottom: 4px; font-family: monospace; line-height: 1.2; }
+    .reason-text { font-size: 12px; color: #1d1d1f !important; line-height: 1.3; }
     .badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
     .badge-success { background-color: #e8f8ee; color: #28cd41 !important; }
     .badge-warning { background-color: #fff4e6; color: #ff9500 !important; }
+    .badge-danger { background-color: #ffe5e5; color: #ff3b30 !important; }
     
-    /* 复盘卡片 */
-    .review-card { background: linear-gradient(135deg, #1A237E 0%, #3949AB 100%); border-radius: 12px; padding: 20px; margin-bottom: 20px; color: white !important; box-shadow: 0 8px 24px rgba(26, 35, 126, 0.2); }
-    .review-card h4 { color: #FFD54F !important; margin-top: 0; }
-    .review-card div { color: #E8EAF6 !important; }
-    .review-card b { color: #ffffff !important; }
-    
+    .review-card { background-color: #fff9f0; border-left: 6px solid #ff9500; border-radius: 12px; padding: 16px; margin-bottom: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.04); font-size: 14px; }
     .insp-hit { background-color: #e8f8ee; border-left: 4px solid #28cd41; padding: 10px; margin-top: 10px; border-radius: 6px; color: #1d1d1f; font-weight: bold; }
     .eval-card { background-color: #ffffff; border-radius: 16px; padding: 20px; box-shadow: 0 8px 24px rgba(0,0,0,0.05); border: 1px solid #e5e5ea; }
-    .star-text { color: #FF5722 !important; font-size: 24px; }
+    .star-text { color: #ff9500 !important; font-size: 24px; }
     
+    div[data-testid="stSelectbox"] > div { background-color: #f5f5f7; border-radius: 10px; border: 1px solid #e5e5ea; }
     .stSelectbox { margin-bottom: -10px; }
     
-    @media (max-width: 768px) { [data-testid="column"] { width: 100% !important; flex: 1 1 100% !important; } }
+    @media (max-width: 768px) {
+        [data-testid="column"] { width: 100% !important; flex: 1 1 100% !important; }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -100,7 +72,7 @@ def sync_database():
     conn = get_db_connection()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT qihao FROM pl3_lottery_history ORDER BY qihao DESC LIMIT 1;")
+            cur.execute("SELECT qihao FROM lottery_history ORDER BY qihao DESC LIMIT 1;")
             res = cur.fetchone()
             max_qihao = res['qihao'] if res else None
 
@@ -121,7 +93,7 @@ def sync_database():
         if records_to_insert:
             with conn.cursor() as cur:
                 insert_query = """
-                    INSERT INTO pl3_lottery_history (qihao, riqi, bai, shi, ge)
+                    INSERT INTO lottery_history (qihao, riqi, bai, shi, ge)
                     VALUES %s ON CONFLICT (qihao) DO UPDATE SET riqi = EXCLUDED.riqi, bai = EXCLUDED.bai, shi = EXCLUDED.shi, ge = EXCLUDED.ge;
                 """
                 values = [(d["code"], d["day"], str(d["one"]), str(d["two"]), str(d["three"])) for d in records_to_insert]
@@ -137,7 +109,7 @@ def load_data_from_db():
     conn = get_db_connection()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT qihao, riqi, bai, shi, ge FROM pl3_lottery_history ORDER BY qihao DESC;")
+            cur.execute("SELECT qihao, riqi, bai, shi, ge FROM lottery_history ORDER BY qihao DESC;")
             rows = cur.fetchall()
     finally:
         conn.close()
@@ -174,11 +146,11 @@ def review_and_optimize(df):
     conn = get_db_connection()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT * FROM pl3_strategy_records WHERE target_qihao = %s;", (latest_qihao,))
+            cur.execute("SELECT * FROM strategy_records WHERE target_qihao = %s;", (latest_qihao,))
             record = cur.fetchone()
-            cur.execute("SELECT weights_cold, weights_hot FROM pl3_strategy_records ORDER BY id DESC LIMIT 1;")
+            cur.execute("SELECT weights_cold, weights_hot FROM strategy_records ORDER BY id DESC LIMIT 1;")
             last_weights_row = cur.fetchone()
-            cur.execute("SELECT picks FROM pl3_inspiration_pool WHERE target_qihao = %s;", (latest_qihao,))
+            cur.execute("SELECT picks FROM inspiration_pool WHERE target_qihao = %s;", (latest_qihao,))
             insp_records = cur.fetchall()
     finally: conn.close()
 
@@ -215,8 +187,8 @@ def review_and_optimize(df):
         is_group = ("".join(sorted(p)) == "".join(sorted(actual_code)))
         
         analysis_str = f"<b>【{p}】</b>: "
-        if is_direct: analysis_str += "<span style='color:#69F0AE'>直选命中！</span> "
-        elif is_group: analysis_str += "<span style='color:#69F0AE'>组选命中！</span> "
+        if is_direct: analysis_str += "<span style='color:#28cd41'>直选命中！</span> "
+        elif is_group: analysis_str += "<span style='color:#28cd41'>组选命中！</span> "
         else: analysis_str += "未中。 "
         
         analysis_str += f"位置命中 {pos_hits} 个 | 和值 {sum(p_nums)} (开奖 {latest_row['和值']})。"
@@ -377,7 +349,7 @@ def generate_picks_core(df, current_weights, exclude_range, analyze_range, num_p
     return picks, reasons
 
 # ================= 页面渲染 =================
-st.title("🏆 排列三 终极量化终端")
+st.title("🎯 福彩3D 终极量化终端")
 st.caption("体彩专属 | 遗漏回归 | 试机号联动 | 全维度统计")
 
 with st.spinner("同步体彩数据中..."):
@@ -448,7 +420,7 @@ with col_left:
     conn = get_db_connection()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT * FROM pl3_strategy_records WHERE target_qihao = %s;", (target_qihao,))
+            cur.execute("SELECT * FROM strategy_records WHERE target_qihao = %s;", (target_qihao,))
             today_record = cur.fetchone()
     finally: conn.close()
 
@@ -460,7 +432,7 @@ with col_left:
         conn = get_db_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("INSERT INTO pl3_strategy_records (date, target_qihao, picks, reasons, weights_cold, weights_hot) VALUES (%s, %s, %s, %s, %s, %s);",
+                cur.execute("INSERT INTO strategy_records (date, target_qihao, picks, reasons, weights_cold, weights_hot) VALUES (%s, %s, %s, %s, %s, %s);",
                     (datetime.now().strftime("%Y-%m-%d %H:%M"), target_qihao, ", ".join(picks), " | ".join(reasons), current_weights["cold"], current_weights["hot"]))
             conn.commit()
         finally: conn.close()
@@ -491,7 +463,7 @@ with col_left:
         st.session_state.extra_picks = (new_picks, new_reasons)
         conn = get_db_connection()
         try:
-            with conn.cursor() as cur: cur.execute("INSERT INTO pl3_inspiration_pool (target_qihao, picks) VALUES (%s, %s);", (target_qihao, ", ".join(new_picks)))
+            with conn.cursor() as cur: cur.execute("INSERT INTO inspiration_pool (target_qihao, picks) VALUES (%s, %s);", (target_qihao, ", ".join(new_picks)))
             conn.commit()
         finally: conn.close()
     
@@ -640,7 +612,7 @@ with st.expander("📂 历史推荐档案库", expanded=False):
     conn = get_db_connection()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT * FROM pl3_strategy_records ORDER BY id DESC LIMIT 10;")
+            cur.execute("SELECT * FROM strategy_records ORDER BY id DESC LIMIT 10;")
             history_records = cur.fetchall()
     finally:
         conn.close()
